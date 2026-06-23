@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.154
+// @version      0.3.155
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.154';
+  const SCRIPT_VERSION = '0.3.155';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -218,53 +218,59 @@
   const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
   // #320/#332 — where the shop sells. The Advertise tab exposes one checkbox per
-  // location; the ticked boxes compose ONE availability line (no second markup
-  // line). `key` persists under settings.locations as a boolean. The browse
-  // venues (bazaar, display case) carry a `findPhrase` and join into a single
-  // "Find my items in ..." clause; Item Market has no findPhrase because it gets
-  // its own clause — the markup wording the user liked — appended whenever it is
-  // ticked. Render/compose order is the array order, so the line always reads
-  // bazaar -> item market -> display case regardless of tick order.
+  // location; the ticked boxes compose ONE availability sentence. `key` persists
+  // under settings.locations as a boolean. The browse venues (bazaar, display
+  // case) carry a bare `browseName` and share a single "my" prefix when they
+  // group; Item Market has no browseName because it is always rendered with its
+  // markup tag baked in ("in the item market with a markup") — it is never named
+  // without that tag, and never named twice. Compose order is the array order.
   const ADV_LOCATIONS = [
-    { key: 'bazaar',      label: 'Bazaar',       findPhrase: 'my bazaar' },
+    { key: 'bazaar',      label: 'Bazaar',       browseName: 'bazaar' },
+    { key: 'displayCase', label: 'Display Case', browseName: 'display case' },
     { key: 'itemMarket',  label: 'Item Market' },
-    { key: 'displayCase', label: 'Display Case', findPhrase: 'my display case' },
   ];
-  // #332 — the item-market clause (verbatim the wording of the retired markup
-  // notice). Appended to the composed line whenever Item Market is ticked, so
-  // the one line covers display case / bazaar AND the item-market markup framing.
-  const ADV_ITEM_MARKET_CLAUSE =
-    'Some items are listed on the item market at a markup, so the price after fees still matches the deal.';
-  const ADV_AVAILABILITY_CLOSER = 'Message me for any item below.';
+  // #332 — the item-market phrase. The lead ("Items may be listed in ") supplies
+  // the first "in", so the phrase itself is bare; when it follows the browse group
+  // a fresh "in" is added before "or". The "with a markup" tag is gated on the
+  // #321 markup setting: it is appended only when the user is actually marking up
+  // item-market prices, so the wording never claims a markup the pricing didn't
+  // apply. Buyers on a sales forum know what a markup is; no reasoning is spelled out.
+  const ADV_ITEM_MARKET_PHRASE = 'the item market';
+  const ADV_ITEM_MARKET_MARKUP_TAG = ' with a markup';
+  const ADV_AVAILABILITY_LEAD = 'Items may be listed in ';
+  const ADV_AVAILABILITY_CLOSER = 'Message for any of these deals below.';
 
-  // #320/#332 — composes the single "where my items are" line from structured
-  // input. Pure; exposed via __RwthPure for the Node test seam. A non-blank
-  // manual override wins verbatim (trimmed). Otherwise the ticked browse venues
-  // form an Oxford-joined "Find my items in ..." clause, the item-market clause
-  // is appended when Item Market is ticked, and a closer is added if anything
-  // showed. The 0-selected case yields '' so the builders hide the line.
-  // Selection order is irrelevant — output follows ADV_LOCATIONS order; unknown
-  // keys are ignored.
+  // #320/#332 — composes the single availability sentence from structured input.
+  // Pure; exposed via __RwthPure for the Node test seam. A non-blank manual
+  // override wins verbatim (trimmed). Otherwise the ticked venues form a flat
+  // list joined with commas and an "or" before the final one: browse venues share
+  // one "my" (only the first carries it) and the item-market phrase gets a fresh
+  // "in" when it isn't first (the lead supplies the first "in") plus the "with a
+  // markup" tag iff `markup` is on. The 0-selected case yields '' so the builders
+  // hide the line. Selection order is irrelevant — output follows ADV_LOCATIONS
+  // order; unknown keys are ignored.
   const AvailabilityLine = {
-    compose(locations, manualOverride) {
+    compose(locations, manualOverride, markup) {
       const override = (manualOverride == null ? '' : String(manualOverride)).trim();
       if (override) return override;
       const keys = Array.isArray(locations) ? locations : [];
-      const findPhrases = ADV_LOCATIONS
-        .filter(l => l.findPhrase && keys.includes(l.key))
-        .map(l => l.findPhrase);
       const parts = [];
-      if (findPhrases.length) {
-        let list;
-        if (findPhrases.length === 1) list = findPhrases[0];
-        else if (findPhrases.length === 2) list = `${findPhrases[0]} and ${findPhrases[1]}`;
-        else list = `${findPhrases.slice(0, -1).join(', ')}, and ${findPhrases[findPhrases.length - 1]}`;
-        parts.push(`Find my items in ${list}.`);
+      for (const l of ADV_LOCATIONS) {
+        if (!keys.includes(l.key)) continue;
+        if (l.browseName) {
+          // First browse venue carries "my"; later ones share it (bare).
+          parts.push(parts.length ? l.browseName : `my ${l.browseName}`);
+        } else {
+          // Item market: bare when it leads (lead supplies "in"), else "in …".
+          const phrase = ADV_ITEM_MARKET_PHRASE + (markup === true ? ADV_ITEM_MARKET_MARKUP_TAG : '');
+          parts.push(parts.length ? `in ${phrase}` : phrase);
+        }
       }
-      if (keys.includes('itemMarket')) parts.push(ADV_ITEM_MARKET_CLAUSE);
       if (!parts.length) return '';
-      parts.push(ADV_AVAILABILITY_CLOSER);
-      return parts.join(' ');
+      const list = parts.length === 1
+        ? parts[0]
+        : `${parts.slice(0, -1).join(', ')}, or ${parts[parts.length - 1]}`;
+      return `${ADV_AVAILABILITY_LEAD}${list}. ${ADV_AVAILABILITY_CLOSER}`;
     },
   };
 
@@ -319,7 +325,7 @@
       const locations = {};
       for (const l of ADV_LOCATIONS) locations[l.key] = locs[l.key] === true;
       const selectedLocKeys = ADV_LOCATIONS.filter(l => locations[l.key]).map(l => l.key);
-      const availability = AvailabilityLine.compose(selectedLocKeys, s.availabilityOverride);
+      const availability = AvailabilityLine.compose(selectedLocKeys, s.availabilityOverride, s.markup === true);
       const wanted = (s.theme == null ? '' : String(s.theme)).trim();
       const preset = THEME_PRESETS.find(p => p.key === wanted)
         || THEME_PRESETS.find(p => p.key === ADV_THEME_DEFAULT);
