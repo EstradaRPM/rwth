@@ -1,0 +1,12 @@
+# Node deps (only vacuum.mjs needs `pg`; installed under auction-db/)
+node_modules/
+
+# Auction-DB secrets — never commit real keys
+auction-db/secrets.local.json
+
+# Auction-DB poller log (written by the scheduled task)
+auction-db/poll.log
+
+# Claude / editor local state
+.claude/settings.local.json
+.claude/worktrees/
