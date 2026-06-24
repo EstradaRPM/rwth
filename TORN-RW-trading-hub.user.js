@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.157
+// @version      0.3.158
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.157';
+  const SCRIPT_VERSION = '0.3.158';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -603,6 +603,16 @@
     // stored value would only sit dead in localStorage. Cleared once on upgrade.
     if (Object.prototype.hasOwnProperty.call(MEM.settings, 'markupNotice')) {
       delete MEM.settings.markupNotice;
+      Store.set('rwth_settings', MEM.settings);
+    }
+
+    // #2 — purge the dead TornPDA `###PDA-APIKEY###` placeholder. The hub always
+    // uses the RWTH custom key from Settings, so a stored PDA token is never a
+    // real key; null it once on upgrade so the user is treated as "no key" and
+    // prompted to generate the real one. Idempotent; a no-op on installs that
+    // never carried the token (gated by hasRealApiKey downstream regardless).
+    if (/^#+PDA-APIKEY#+$/.test(String(MEM.settings.apiKey || ''))) {
+      MEM.settings.apiKey = null;
       Store.set('rwth_settings', MEM.settings);
     }
 
@@ -3190,13 +3200,14 @@
       .replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   }
 
-  // #313 — the hub needs the RWTH custom key, so it never relies on the PDA
-  // auto-injected key (almost always too limited). A "real" key is any
-  // non-empty value; the stray ###PDA-APIKEY### token left by older installs is
-  // rejected so it cannot falsely lock the Player ID field.
+  // #313/#2 — the hub needs the RWTH custom key, so it never relies on the PDA
+  // auto-injected key (almost always too limited). A "real" key is any non-empty
+  // value; the stray `###PDA-APIKEY###` placeholder left by TornPDA is rejected
+  // so it cannot falsely lock the Player ID field or trip a keyed fetch. This is
+  // the single canonical key gate — every call site routes through it.
   function hasRealApiKey(key) {
     const k = String(key == null ? '' : key).trim();
-    return Boolean(k) && k !== '###PDA-APIKEY###';
+    return Boolean(k) && !/^#+PDA-APIKEY#+$/.test(k);
   }
 
   // #314 — the effective weav3r price-list link for the Advertise outputs.
@@ -5448,7 +5459,7 @@
         return cached.byName;
       }
       const key = (MEM.settings && MEM.settings.apiKey || '').trim();
-      if (!key || /^#+PDA-APIKEY#+$/.test(key)) return null;
+      if (!hasRealApiKey(key)) return null;
       const res = await fetch(`${API_BASE}/v2/torn/items?key=${encodeURIComponent(key)}`);
       const d = await res.json();
       if (d && d.error) throw new Error(`${d.error.error} (code ${d.error.code})`);
@@ -7674,14 +7685,13 @@
           const apiKey = (MEM.settings && MEM.settings.apiKey || '').trim();
           // Weapons require a resolved bonus title; armor needs only the item id.
           const queryable = itemId != null && (isArmor || !!bonus)
-            && apiKey && !/^#+PDA-APIKEY#+$/.test(apiKey);
+            && hasRealApiKey(apiKey);
           diag.queryable = !!queryable;
           if (!queryable) {
             diag.skipReason = itemId == null ? 'no item id'
-              : (!apiKey ? 'no API key'
-              : (/^#+PDA-APIKEY#+$/.test(apiKey) ? 'PDA key placeholder'
+              : (!hasRealApiKey(apiKey) ? 'no API key'
               : (!isArmor && !bonus ? 'weapon has no resolved bonus title'
-              : 'unknown')));
+              : 'unknown'));
           }
           if (queryable) {
             const url = `${API_BASE}/v2/market/${itemId}/itemmarket?`
@@ -8784,7 +8794,7 @@
         return cached;
       }
       const key = (MEM.settings && MEM.settings.apiKey) || '';
-      if (!key || /^#+PDA-APIKEY#+$/.test(key)) {
+      if (!hasRealApiKey(key)) {
         MEM.fetchError = 'No API key — enter one in Settings';
         return null;
       }
@@ -10545,6 +10555,8 @@
     itemDictNameMapFromCache,
     selectedScanLogTypes,
     mergeLadder,
+    hasRealApiKey,
+    hydrate,
   };
 
   // ─── Bootstrap ───────────────────────────────────────────────────────────────
