@@ -1,21 +1,21 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.155
+// @version      0.3.156
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
 // @connect      weav3r.dev
 // @connect      kozewwpyssyzuyksnoqu.supabase.co
-// @updateURL    https://raw.githubusercontent.com/estradarpm/torn-scripts/main/TORN-RW-trading-hub.user.js
-// @downloadURL  https://raw.githubusercontent.com/estradarpm/torn-scripts/main/TORN-RW-trading-hub.user.js
+// @updateURL    https://raw.githubusercontent.com/EstradaRPM/rwth/main/TORN-RW-trading-hub.user.js
+// @downloadURL  https://raw.githubusercontent.com/EstradaRPM/rwth/main/TORN-RW-trading-hub.user.js
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.155';
+  const SCRIPT_VERSION = '0.3.156';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -3735,9 +3735,6 @@
   }
 
   const AdvertiseGenerator = {
-    // Output 1 — forum thread title; the user's configured title.
-    toForumTitle(settings) { return AdvConfig.resolve(settings).identity.forumThreadTitle; },
-
     // Output — full forum post HTML. Item-driven from the selected `listed`
     // rows + Recent Transactions; cards grouped under category dividers.
     toForumHtml(items, transactions, settings) {
@@ -4171,19 +4168,13 @@
       : AdvertiseGenerator.toForumHtml(selectedItems, transactions, st);
 
     // #324 — section bodies built as locals so the assembled layout below reads
-    // as a flat list of collapsible bars. Workflow order: the pivotal items area
-    // (prices, images, the item-market reference) sits at the top, set-once
-    // branding/copy fold away beneath it, then the unified Copy-to-Torn section
-    // (#325) carrying the quick-copy text strip and the surface preview/copy switcher.
+    // as a flat list of collapsible bars. Workflow order: the two high-frequency
+    // sections lead — the items area (prices, images, the markup toggle + its
+    // per-item item-market reference) then the unified Copy-to-Torn section (#325,
+    // the quick-copy text strip and the surface preview/copy switcher) — and the
+    // set-once branding/copy/transactions fold away beneath them.
 
-    // #332 — the item-market markup controls moved to Post text (the "Where
-    // buyers find & pay you" group) so every "how I sell" control lives together.
-    // The item rows still surface the per-item item-market reference price when
-    // markup is on; only the toggle itself relocated.
-    const itemsBody = `
-        ${markup ? '<span class="rwth-field-help">Item-market list prices (marked up) are shown on the rows below; the markup toggle is in <b>Post text → Where buyers find &amp; pay you</b>.</span>' : ''}
-        ${itemRows}`;
-    // #331/#332 — the "include mug buffer" toggle surfaces only when markup is on.
+    // #331 — the "include mug buffer" toggle surfaces only when markup is on.
     // It grosses each item-market list price up further (using the mug cushion
     // from Settings) so the price still nets the ask after both the fee and a mug.
     const mugMarkupField = markup ? `
@@ -4191,6 +4182,18 @@
           <input type="checkbox" data-adv-mug${mugMarkup ? ' checked' : ''}>
           Also cover a mug on the sale (lists higher so the price after fees and a possible mug still nets your ask, using your ${Number(intel.mugBuffer) || 0}% mug cushion)
         </label>` : '';
+    // The item-market markup controls live with the items they reprice: the
+    // toggle (and its mug sub-toggle) sit directly above the rows, and each row
+    // surfaces its per-item item-market reference price when markup is on. This
+    // is the only control on the tab that changes prices.
+    const itemsBody = `
+        <label class="rwth-intel-check">
+          <input type="checkbox" data-adv-markup${markup ? ' checked' : ''}>
+          Mark prices up for the item market (lists 5% over your ask so the price after fees still nets your ask)
+        </label>
+        <span class="rwth-field-help">The only control that changes your prices. When on, each row below shows the item-market list price &mdash; grossed up so the price after fees still nets your ask.</span>
+        ${mugMarkupField}
+        ${itemRows}`;
 
     // Brand & look — set-once identity, links, theme/colours and pictures.
     const brandBody = `
@@ -4204,11 +4207,15 @@
         </label>
         <label class="rwth-field">
           <span class="rwth-field-label">Your forum thread title</span>
-          <input class="rwth-field-input" type="text" data-adv-identity="forumThreadTitle"
+          <input class="rwth-field-input" id="rwth-adv-forum-title" type="text" data-adv-identity="forumThreadTitle"
                  value="${escapeAttr(settings.forumThreadTitle)}"
                  placeholder="${escapeAttr(ADV_IDENTITY_DEFAULTS.forumThreadTitle)}"
                  autocomplete="off" spellcheck="false">
         </label>
+        <div class="rwth-form-actions">
+          <button class="rwth-btn-sm" type="button" data-action="copy-output"
+                  data-copy-target="rwth-adv-forum-title">Copy thread title</button>
+        </div>
         <label class="rwth-field">
           <span class="rwth-field-label">Your shop tagline</span>
           <input class="rwth-field-input" type="text" data-adv-identity="tagline"
@@ -4293,18 +4300,12 @@
                  autocomplete="off" spellcheck="false">
         </label>
         <div class="rwth-form-title">Where buyers find &amp; pay you</div>
-        <span class="rwth-field-help">Tick where you sell — the post writes one line covering all of it. Ticking a box never changes your prices; only the markup toggle below does.</span>
+        <span class="rwth-field-help">Tick where you sell — the post writes one line covering all of it. Ticking a box never changes your prices; the markup toggle in &ldquo;Items to advertise&rdquo; does that.</span>
         ${ADV_LOCATIONS.map(l => `
         <label class="rwth-intel-check">
           <input type="checkbox" data-adv-location="${l.key}"${locations[l.key] ? ' checked' : ''}>
           ${l.label}
         </label>`).join('')}
-        <label class="rwth-intel-check">
-          <input type="checkbox" data-adv-markup${markup ? ' checked' : ''}>
-          Mark prices up for the item market (lists 5% over your ask so the price after fees still nets your ask)
-        </label>
-        <span class="rwth-field-help">This is the only control that changes your prices. When on, your item-market list prices are grossed up so the price after fees still nets your ask, and those prices show on the item rows in &ldquo;Items to advertise&rdquo;.</span>
-        ${mugMarkupField}
         <label class="rwth-field">
           <span class="rwth-field-label">Availability line override</span>
           <input class="rwth-field-input" type="text" data-adv-availability
@@ -4315,28 +4316,27 @@
 
     // Recent transactions — optional social-proof block with its own in-post toggle.
     const txBody = `
-        <label class="rwth-intel-check">
-          <input type="checkbox" data-adv-section="transactions"${sections.transactions ? ' checked' : ''}>
-          Show this section in the forum post
-        </label>
         ${txRows}
         <div class="rwth-form-actions">
           <button class="rwth-btn rwth-btn-add" type="button" data-action="add-tx">+ add transaction</button>
-        </div>`;
+        </div>
+        <label class="rwth-intel-check">
+          <input type="checkbox" data-adv-section="transactions"${sections.transactions ? ' checked' : ''}>
+          Show this section in the forum post
+        </label>`;
 
     // The whole Copy-to-Torn body — text strip + surface switcher — is built
     // only while its section is unfolded, so a folded section costs zero
     // generator runs per render.
     let outputsBody = '';
     if (!fold.advOutputs) {
-      // #325 — quick-copy text strip on top: the two non-visual outputs (a forum
-      // title and the trade-chat blurb). They have no rendered "look", so they are
-      // plain copy rows, sat above the surface switcher because they are grabbed
-      // first and most often. The chat blurb stays an editable textarea for last-
-      // second wording tweaks before copy.
+      // #325 — quick-copy text strip on top: the trade-chat blurb, a non-visual
+      // output with no rendered "look", sat above the surface switcher. The forum
+      // thread title used to live here too, but it is a verbatim echo of the
+      // "Your forum thread title" identity field, so it is copied at source from
+      // Brand & look instead. The chat blurb stays an editable textarea for
+      // last-second wording tweaks before copy.
       const textStrip = `
-        ${buildOutputBox('Forum title', 'rwth-out-title',
-                         AdvertiseGenerator.toForumTitle(settings), false)}
         ${buildOutputBox('Trade-chat blurb', 'rwth-out-chat',
                          AdvertiseGenerator.toChat(selectedItems, settings), true, 3)}`;
 
@@ -4373,11 +4373,19 @@
         <div class="rwth-adv-surface">${surfaceSwitcher}</div>`;
     }
 
+    // Layout follows the daily workflow: the two high-frequency sections —
+    // picking/pricing items and grabbing the outputs — sit adjacent at the top;
+    // the set-once configuration (branding, post text, transactions) folds away
+    // beneath them.
     return `<div class="rwth-advertise">
       <div class="rwth-adv-section">
         ${collapseHead(`Items to advertise${listed.length ? ` (${listed.length})` : ''}`,
                        'advItems', fold.advItems)}
         ${fold.advItems ? '' : itemsBody}
+      </div>
+      <div class="rwth-adv-section">
+        ${collapseHead('Copy to Torn', 'advOutputs', fold.advOutputs)}
+        ${outputsBody}
       </div>
       <div class="rwth-adv-section">
         ${collapseHead('Brand & look', 'brandLook', fold.brandLook)}
@@ -4390,10 +4398,6 @@
       <div class="rwth-adv-section">
         ${collapseHead('Recent transactions', 'advTx', fold.advTx)}
         ${fold.advTx ? '' : txBody}
-      </div>
-      <div class="rwth-adv-section">
-        ${collapseHead('Copy to Torn', 'advOutputs', fold.advOutputs)}
-        ${outputsBody}
       </div>
     </div>`;
   }
@@ -6168,7 +6172,12 @@
   function copyOutput(id) {
     const el = id && document.getElementById(id);
     if (!el) return;
-    const text = el.tagName === 'TEXTAREA' ? el.value : el.textContent;
+    // INPUT/TEXTAREA carry their text in `.value`; an input copied while blank
+    // falls back to its placeholder so "copy at source" still yields the shown
+    // default (e.g. the neutral forum-thread-title default).
+    const text = el.tagName === 'TEXTAREA' ? el.value
+      : el.tagName === 'INPUT' ? (el.value || el.placeholder || '')
+      : el.textContent;
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text);
     }
