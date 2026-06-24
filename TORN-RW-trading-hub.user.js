@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.159
+// @version      0.3.160
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.159';
+  const SCRIPT_VERSION = '0.3.160';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -7402,6 +7402,11 @@
     user(key) {
       return this.get('/user', {}, { comment: 'rwth-test', key });
     },
+    // Buyer id → basic profile (the buyer-name resolver reads `.name` off this).
+    userBasic(id, key) {
+      return this.get('/user/' + encodeURIComponent(id) + '/basic', {},
+        { comment: 'rwth-buyer', key });
+    },
   };
 
   // ─── Buyer name resolution ───────────────────────────────────────────────
@@ -7429,10 +7434,9 @@
   }
 
   function fetchUserName(id, key) {
-    const url = `${API_BASE}/v2/user/${encodeURIComponent(id)}/basic`
-      + `?key=${encodeURIComponent(key)}&comment=rwth-buyer`;
-    return gmRequest({ method: 'GET', url }).then((d) => {
-      if (d && d.error) throw new Error(`${d.error.error} (code ${d.error.code})`);
+    // Transport + envelope unwrap live in the client now (#4); the id→name
+    // extraction, caching, and pacing stay here in the resolver.
+    return Torn.userBasic(id, key).then((d) => {
       const name = d && (d.name
         || (d.basic && d.basic.name)
         || (d.profile && d.profile.name));

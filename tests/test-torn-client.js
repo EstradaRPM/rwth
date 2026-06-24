@@ -99,6 +99,38 @@ test('user() sends only params /user allows per the USED registry', async () => 
   }
 });
 
+test('userBasic(id) hits /user/{id}/basic with comment=rwth-buyer and the key', async () => {
+  const seen = stubGM({ name: 'Buyer', player_id: 99 });
+  await Torn.userBasic(99, GOOD_KEY);
+  assert.ok(seen.opts.url.includes('/v2/user/99/basic?'), seen.opts.url);
+  const qp = queryParams(seen.opts.url);
+  assert.equal(qp.get('comment'), 'rwth-buyer');
+  assert.equal(qp.get('key'), GOOD_KEY);
+});
+
+test('userBasic() sends only params /user/{id}/basic allows per the USED registry', async () => {
+  const gen = await import('../tools/gen-api-registry.mjs');
+  const allowed = new Set(gen.USED['/user/{id}/basic'].used); // ['key','comment']
+  const seen = stubGM({ name: 'Buyer' });
+  await Torn.userBasic(99, GOOD_KEY);
+  for (const name of queryParams(seen.opts.url).keys()) {
+    assert.ok(allowed.has(name), `unexpected param "${name}" not in USED['/user/{id}/basic']`);
+  }
+});
+
+test('userBasic falls back to MEM.settings.apiKey and unwraps the error envelope', async () => {
+  const seen = stubGM({ name: 'Buyer' });
+  await Torn.userBasic(99);
+  assert.equal(queryParams(seen.opts.url).get('key'), 'SETTINGSKEY12345');
+
+  stubGM({ error: { code: 6, error: 'Incorrect ID' } });
+  await assert.rejects(Torn.userBasic(99, GOOD_KEY), (err) => {
+    assert.match(err.message, /Incorrect ID \(code 6\)/);
+    assert.equal(err.tornCode, 6);
+    return true;
+  });
+});
+
 // Sanity: the live userscript declares @connect api.torn.com (the one item the
 // PRD calls out to verify on auto-update).
 test('@connect api.torn.com is granted in the UserScript header', () => {
