@@ -29,6 +29,10 @@ node auction-db/backfill.mjs    # one-time historical walk back to June 2023
 node auction-db/check.mjs       # health check: row count, oldest/newest
 node auction-db/compare.mjs     # dry-run: compare our DB vs the third-party source
 cd auction-db && npm install && node vacuum.mjs   # VACUUM FULL — only this needs `pg`
+
+# Regenerate the API registry from the stored Torn spec (after changing a call)
+node tools/gen-api-registry.mjs           # rebuild docs/api-endpoints.md from the stored spec
+node tools/gen-api-registry.mjs --fetch   # re-download Torn's openapi.json first, then rebuild
 ```
 
 There is no build step, linter, or bundler — the `.user.js` ships as-is. There is
@@ -74,6 +78,26 @@ banner comments that divide the file into sections):
   via RLS), the Weav3r ranked-weapons API, and the Torn API. All requests go through
   `gmRequest` (a `GM_xmlhttpRequest`→Promise wrapper). A localStorage LRU `Cache`
   (5-min TTL) sits in front of Supabase reads.
+
+## API endpoint registry — single source of truth
+
+**Never guess an endpoint or parameter, and never ask the user what one is.** The
+complete record lives in the repo:
+
+- **`docs/api/torn-openapi.json`** — Torn's full OpenAPI spec (all 205 paths, every
+  parameter, every enum). This is authoritative for anything Torn. Refresh with
+  `node tools/gen-api-registry.mjs --fetch`.
+- **`docs/api-endpoints.md`** — curated fast-path: the endpoints we actually call
+  (Torn + Supabase PostgREST + Weav3r) with their *full* allowed parameter surface,
+  flagging which params we currently send (`✅`) vs. which are available unused. The
+  Torn tables are generated from the spec — do not hand-edit them.
+- **`tests/test-api-endpoints.js`** (in `node --test`) is the drift guard: it fails
+  if the code calls a Torn endpoint not registered in `tools/gen-api-registry.mjs`'s
+  `USED`, if `USED` claims a param the spec doesn't list, or if `docs/api-endpoints.md`
+  is stale. So the registry can never silently disagree with the code or the spec.
+
+When you add or change an API call: update `USED` in `tools/gen-api-registry.mjs`,
+run `node tools/gen-api-registry.mjs`, and let the test confirm code ↔ registry ↔ spec.
 
 ### Versioning
 

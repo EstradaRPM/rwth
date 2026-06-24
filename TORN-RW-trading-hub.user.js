@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.156
+// @version      0.3.157
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -15,7 +15,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.156';
+  const SCRIPT_VERSION = '0.3.157';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -8796,13 +8796,15 @@
         let cacheIds = Store.get('rwth_bb_cache_ids') || {};
         const missing = cacheNames.filter(n => !cacheIds[n]);
         if (missing.length) {
-          const r = await fetch(`${API_BASE}/torn/?selections=items&key=${encodeURIComponent(key)}&comment=rwth-bb`);
+          const r = await fetch(`${API_BASE}/v2/torn/items?key=${encodeURIComponent(key)}&comment=rwth-bb`);
           const d = await r.json();
           if (d && d.error) { MEM.fetchError = `BB items: ${d.error.error}`; return null; }
+          // v2 /torn/items returns `items` as an array (each element carries its
+          // own id), but tolerate the legacy id-keyed object shape too.
           const items = (d && d.items) || {};
-          for (const id of Object.keys(items)) {
-            const it = items[id];
-            if (it && cacheNames.includes(it.name)) cacheIds[it.name] = parseInt(id, 10);
+          const list = Array.isArray(items) ? items : Object.values(items);
+          for (const it of list) {
+            if (it && it.name && cacheNames.includes(it.name)) cacheIds[it.name] = parseInt(it.id, 10);
           }
           const stillMissing = cacheNames.filter(n => !cacheIds[n]);
           if (stillMissing.length) {
