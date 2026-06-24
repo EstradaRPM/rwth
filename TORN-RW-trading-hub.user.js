@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.161
+// @version      0.3.162
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.161';
+  const SCRIPT_VERSION = '0.3.162';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -5629,20 +5629,12 @@
   }
 
   async function fetchLogType(logType, key, cutoffUnix) {
-    const params = new URLSearchParams({
-      log: String(logType),
-      limit: String(SCAN_LOG_LIMIT),
+    // Transport + envelope unwrap live in the client now (#6); the `_`
+    // cache-buster and the `from` cutoff are preserved by Torn.userLog.
+    const d = await Torn.userLog(
+      { log: logType, from: cutoffUnix, limit: SCAN_LOG_LIMIT },
       key,
-      comment: 'rwth-scan',
-      _: String(Date.now()),
-    });
-    if (cutoffUnix != null) params.set('from', String(cutoffUnix));
-    const res = await fetch(`${API_BASE}/v2/user/log?${params.toString()}`);
-    let d;
-    try { d = await res.json(); }
-    catch (err) { throw new Error(`bad JSON from Torn API (${res.status || 'no status'}): ${scanErrorMessage(err)}`); }
-    if (!res.ok) throw new Error(`HTTP ${res.status}${d && d.error ? `: ${d.error.error}` : ''}`);
-    if (d && d.error) throw new Error(`${d.error.error} (code ${d.error.code})`);
+    );
     return (d && d.log) || [];
   }
 
@@ -7407,6 +7399,14 @@
     // Torn's id→title logtype map (the scan-debug logtype-id validator reads it).
     logTypes(key) {
       return this.get('/torn/logtypes', {}, { comment: 'rwth-logtypes', key });
+    },
+    // Scan reconciliation: one logtype's rows (buys/sales/trades/mugs). The `_`
+    // cache-buster (NOT a spec param) and the `from` cutoff are preserved
+    // exactly (#6); `from` is omitted when null, matching the old call site.
+    userLog({ log, from, limit }, key) {
+      const params = { log, limit, _: Date.now() };
+      if (from != null) params.from = from;
+      return this.get('/user/log', params, { comment: 'rwth-scan', key });
     },
   };
 

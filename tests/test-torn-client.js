@@ -163,6 +163,49 @@ test('logTypes falls back to MEM.settings.apiKey and unwraps the error envelope'
   });
 });
 
+test('userLog() hits /user/log with comment=rwth-scan, the key, log, limit and a `_` cache-buster', async () => {
+  const seen = stubGM({ log: {} });
+  await Torn.userLog({ log: 6320, limit: 100, from: 1700000000 }, GOOD_KEY);
+  assert.ok(seen.opts.url.includes('/v2/user/log?'), seen.opts.url);
+  const qp = queryParams(seen.opts.url);
+  assert.equal(qp.get('comment'), 'rwth-scan');
+  assert.equal(qp.get('key'), GOOD_KEY);
+  assert.equal(qp.get('log'), '6320');
+  assert.equal(qp.get('limit'), '100');
+  assert.equal(qp.get('from'), '1700000000');
+  assert.ok(/^\d+$/.test(qp.get('_')), `cache-buster should be a timestamp, got ${qp.get('_')}`);
+});
+
+test('userLog() omits `from` when the cutoff is null (matching the old call site)', async () => {
+  const seen = stubGM({ log: {} });
+  await Torn.userLog({ log: 6320, limit: 100, from: null }, GOOD_KEY);
+  assert.equal(queryParams(seen.opts.url).has('from'), false);
+});
+
+test('userLog() sends only params /user/log allows per USED (plus the non-spec `_`)', async () => {
+  const gen = await import('../tools/gen-api-registry.mjs');
+  const allowed = new Set(gen.USED['/user/log'].used); // log,limit,from,key,comment
+  allowed.add('_'); // the cache-buster the registry note flags as NOT a spec param
+  const seen = stubGM({ log: {} });
+  await Torn.userLog({ log: 6320, limit: 100, from: 1700000000 }, GOOD_KEY);
+  for (const name of queryParams(seen.opts.url).keys()) {
+    assert.ok(allowed.has(name), `unexpected param "${name}" not in USED['/user/log']`);
+  }
+});
+
+test('userLog falls back to MEM.settings.apiKey and unwraps the error envelope', async () => {
+  const seen = stubGM({ log: {} });
+  await Torn.userLog({ log: 6320, limit: 100 });
+  assert.equal(queryParams(seen.opts.url).get('key'), 'SETTINGSKEY12345');
+
+  stubGM({ error: { code: 2, error: 'Incorrect key' } });
+  await assert.rejects(Torn.userLog({ log: 6320, limit: 100 }, GOOD_KEY), (err) => {
+    assert.match(err.message, /Incorrect key \(code 2\)/);
+    assert.equal(err.tornCode, 2);
+    return true;
+  });
+});
+
 // Sanity: the live userscript declares @connect api.torn.com (the one item the
 // PRD calls out to verify on auto-update).
 test('@connect api.torn.com is granted in the UserScript header', () => {
