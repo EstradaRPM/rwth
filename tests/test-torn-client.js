@@ -131,6 +131,38 @@ test('userBasic falls back to MEM.settings.apiKey and unwraps the error envelope
   });
 });
 
+test('logTypes() hits /torn/logtypes with comment=rwth-logtypes and the key', async () => {
+  const seen = stubGM({ logtypes: { 1: 'Attack' } });
+  await Torn.logTypes(GOOD_KEY);
+  assert.ok(seen.opts.url.includes('/v2/torn/logtypes?'), seen.opts.url);
+  const qp = queryParams(seen.opts.url);
+  assert.equal(qp.get('comment'), 'rwth-logtypes');
+  assert.equal(qp.get('key'), GOOD_KEY);
+});
+
+test('logTypes() sends only params /torn/logtypes allows per the USED registry', async () => {
+  const gen = await import('../tools/gen-api-registry.mjs');
+  const allowed = new Set(gen.USED['/torn/logtypes'].used); // ['key','comment']
+  const seen = stubGM({ logtypes: {} });
+  await Torn.logTypes(GOOD_KEY);
+  for (const name of queryParams(seen.opts.url).keys()) {
+    assert.ok(allowed.has(name), `unexpected param "${name}" not in USED['/torn/logtypes']`);
+  }
+});
+
+test('logTypes falls back to MEM.settings.apiKey and unwraps the error envelope', async () => {
+  const seen = stubGM({ logtypes: {} });
+  await Torn.logTypes();
+  assert.equal(queryParams(seen.opts.url).get('key'), 'SETTINGSKEY12345');
+
+  stubGM({ error: { code: 2, error: 'Incorrect key' } });
+  await assert.rejects(Torn.logTypes(GOOD_KEY), (err) => {
+    assert.match(err.message, /Incorrect key \(code 2\)/);
+    assert.equal(err.tornCode, 2);
+    return true;
+  });
+});
+
 // Sanity: the live userscript declares @connect api.torn.com (the one item the
 // PRD calls out to verify on auto-update).
 test('@connect api.torn.com is granted in the UserScript header', () => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.160
+// @version      0.3.161
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.160';
+  const SCRIPT_VERSION = '0.3.161';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -5653,12 +5653,9 @@
   // eyeballed against its intent. Temporary debug aid — remove once IDs are
   // confirmed. Best-effort: any failure degrades to a single explanatory line.
   async function fetchLogTypes(key) {
-    const res = await fetch(`${API_BASE}/v2/torn/logtypes?key=${encodeURIComponent(key)}&comment=rwth-logtypes`);
-    let d;
-    try { d = await res.json(); }
-    catch (err) { throw new Error(`bad JSON from Torn API (${res.status || 'no status'}): ${scanErrorMessage(err)}`); }
-    if (!res.ok) throw new Error(`HTTP ${res.status}${d && d.error ? `: ${d.error.error}` : ''}`);
-    if (d && d.error) throw new Error(`${d.error.error} (code ${d.error.code})`);
+    // Transport + envelope unwrap live in the client now (#5); the id->title
+    // map extraction stays here in the debug helper.
+    const d = await Torn.logTypes(key);
     // Accept either an id->title object map or an array of {id,title} rows.
     const raw = (d && (d.logtypes || d.log)) || {};
     const map = {};
@@ -7406,6 +7403,10 @@
     userBasic(id, key) {
       return this.get('/user/' + encodeURIComponent(id) + '/basic', {},
         { comment: 'rwth-buyer', key });
+    },
+    // Torn's id→title logtype map (the scan-debug logtype-id validator reads it).
+    logTypes(key) {
+      return this.get('/torn/logtypes', {}, { comment: 'rwth-logtypes', key });
     },
   };
 
