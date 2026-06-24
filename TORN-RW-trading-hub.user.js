@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.158
+// @version      0.3.159
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
 // @grant        GM_xmlhttpRequest
+// @connect      api.torn.com
 // @connect      weav3r.dev
 // @connect      kozewwpyssyzuyksnoqu.supabase.co
 // @updateURL    https://raw.githubusercontent.com/EstradaRPM/rwth/main/TORN-RW-trading-hub.user.js
@@ -15,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.158';
+  const SCRIPT_VERSION = '0.3.159';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4895,17 +4896,20 @@
     }
     setStatus('Checking your key…', null);
 
-    let d;
+    // Route through the Torn client (#1). It throws on the {error:…} envelope
+    // (carrying .tornCode) and on transport failure — the two branches the old
+    // raw-fetch path distinguished as "bad key" vs "could not reach".
+    let who = null;
     try {
-      const res = await fetch(
-        `${API_BASE}/v2/user?key=${encodeURIComponent(key)}&comment=rwth-test`);
-      d = await res.json();
-    } catch {
-      setStatus('Could not reach Torn just now — check your connection and try again.',
-                'rwth-key-test-err');
+      who = pickUserIdentity(await Torn.user(key));
+    } catch (err) {
+      setStatus(
+        err && err.tornCode != null
+          ? 'That key did not work — double-check you pasted the whole thing.'
+          : 'Could not reach Torn just now — check your connection and try again.',
+        'rwth-key-test-err');
       return;
     }
-    const who = (d && !d.error) ? pickUserIdentity(d) : null;
     if (!who) {
       setStatus('That key did not work — double-check you pasted the whole thing.',
                 'rwth-key-test-err');
@@ -7359,6 +7363,46 @@
       });
     });
   }
+
+  // ─── Torn API client (ADR-0002, ADR-0003) ────────────────────────────────
+  // The single deep client every Torn v2 call funnels through (#1). One private
+  // `get(path, params, {comment, key})` owns the plumbing each call site used to
+  // hand-roll: resolve + gate the key (the canonical `hasRealApiKey`), tag the
+  // request with `comment=`, build the URL against `API_BASE`, send via
+  // `gmRequest` (so the `__RWTH_GM` test seam covers Torn), parse the JSON, and
+  // unwrap the one-and-only `{error:{code,error}}` envelope into a single tagged
+  // Error. `gmRequest` already rejects non-2xx (`HTTP <status>`), matching what
+  // the scan/logtypes sites relied on. The error carries `.tornCode` so a caller
+  // can tell a key the API rejected apart from a transport failure.
+  // `key` defaults to `MEM.settings.apiKey`; callers testing an unsaved field
+  // (the Settings key-test) pass it explicitly.
+  const Torn = {
+    async get(path, params, opts) {
+      opts = opts || {};
+      const key = String(
+        opts.key != null ? opts.key : ((MEM.settings && MEM.settings.apiKey) || '')
+      ).trim();
+      if (!hasRealApiKey(key)) throw new Error('No API key');
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(params || {})) {
+        if (v != null && v !== '') qs.set(k, String(v));
+      }
+      qs.set('key', key);
+      if (opts.comment) qs.set('comment', opts.comment);
+      const url = API_BASE + '/v2' + path + '?' + qs.toString();
+      const d = await gmRequest({ method: 'GET', url });
+      if (d && d.error) {
+        const e = new Error(`${d.error.error} (code ${d.error.code})`);
+        e.tornCode = d.error.code;
+        throw e;
+      }
+      return d;
+    },
+    // API-key validation. `key` lets the Settings test check an unsaved field.
+    user(key) {
+      return this.get('/user', {}, { comment: 'rwth-test', key });
+    },
+  };
 
   // ─── Buyer name resolution ───────────────────────────────────────────────
   // A scanned sale's buyer comes from the v2 sell log's data.buyer, which is a
@@ -10557,6 +10601,7 @@
     mergeLadder,
     hasRealApiKey,
     hydrate,
+    Torn,
   };
 
   // ─── Bootstrap ───────────────────────────────────────────────────────────────
