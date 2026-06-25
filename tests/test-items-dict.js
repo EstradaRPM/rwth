@@ -164,19 +164,20 @@ test('BBEngine.fetchBBRate resolves cache ids off the shared dict — no /torn/i
   });
   localStorage.setItem('rwth_items_dict', JSON.stringify({ ts: Date.now(), byName }));
 
-  // The items transport must NOT fire — fail loudly if it does.
-  const seen = stubGM({ items: [] });
-  // Market listings come over global fetch; hand back a flat $1000 each.
-  const prevFetch = globalThis.fetch;
-  globalThis.fetch = async () => ({ json: async () => ({ itemmarket: { listings: [{ price: 1000 }] } }) });
-  try {
-    const out = await BBEngine.fetchBBRate({ force: true });
-    assert.ok(out && typeof out.rate === 'number' && out.rate > 0, 'a BB rate is produced');
-    assert.equal(seen.calls, 0, 'no /torn/items fetch — ids came from the dict');
-    const cacheIds = readStore('rwth_bb_cache_ids');
-    assert.equal(cacheIds['Small Arms Cache'], 1000);
-    assert.equal(cacheIds['Heavy Arms Cache'], 1004);
-  } finally {
-    globalThis.fetch = prevFetch;
-  }
+  // Market listings now flow through Torn.itemMarket → gmRequest → the __RWTH_GM
+  // seam (#9), the same transport the items dict would use. Record every URL and
+  // hand back a flat $1000 each; the items transport must NOT fire — assert no
+  // request hit /torn/items rather than a bare call count.
+  const urls = [];
+  globalThis.__RWTH_GM = (opts) => {
+    urls.push(opts.url);
+    setTimeout(() => opts.onload({ status: 200, responseText: JSON.stringify({ itemmarket: { listings: [{ price: 1000 }] } }) }), 1);
+  };
+  const out = await BBEngine.fetchBBRate({ force: true });
+  assert.ok(out && typeof out.rate === 'number' && out.rate > 0, 'a BB rate is produced');
+  assert.ok(!urls.some(u => u.includes('/torn/items')), 'no /torn/items fetch — ids came from the dict');
+  assert.ok(urls.every(u => /\/market\/\d+\/itemmarket/.test(u)), 'BB pull goes through Torn.itemMarket');
+  const cacheIds = readStore('rwth_bb_cache_ids');
+  assert.equal(cacheIds['Small Arms Cache'], 1000);
+  assert.equal(cacheIds['Heavy Arms Cache'], 1004);
 });

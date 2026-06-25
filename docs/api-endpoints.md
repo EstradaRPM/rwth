@@ -99,13 +99,13 @@ item dictionary (type/sub_type/name; comment=rwth-items).
 
 ### `GET /v2/torn/{id}/itemdetails`
 
-per-instance quality/bonuses/rarity.
+scan-buy enrichment: per-instance quality/bonuses/rarity (comment=rwth-itemdetails).
 
 | Param | In | Req | Type / enum | We send |
 |---|---|---|---|---|
 | `id` | path | yes | ItemUid |  |
 | `timestamp` | query | no |  |  |
-| `comment` | query | no | string |  |
+| `comment` | query | no | string | ✅ |
 | `key` | query | no | string | ✅ |
 
 ### `GET /v2/torn/logtypes`
