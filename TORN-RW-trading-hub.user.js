@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.164
+// @version      0.3.165
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.164';
+  const SCRIPT_VERSION = '0.3.165';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -8911,9 +8911,14 @@
         }
         const results = await Promise.all(COMBAT_CACHES.map(async ({ name, bb }) => {
           const id = cacheIds[name];
-          const r = await fetch(`${API_BASE}/v2/market/${id}/itemmarket?limit=1&key=${encodeURIComponent(key)}&comment=rwth-bb`);
-          const d = await r.json();
-          if (d && d.error) return null;
+          // Transport + envelope unwrap now live in Torn.itemMarket (#9). The
+          // client throws on both HTTP and API-envelope failures; catching per
+          // cache preserves the old `d.error → drop this one` semantics so a
+          // single bad listing can't sink the whole harmonic-mean rate.
+          let d;
+          try {
+            d = await Torn.itemMarket(id, { limit: 1, comment: 'rwth-bb', key });
+          } catch { return null; }
           const price = d && d.itemmarket && d.itemmarket.listings && d.itemmarket.listings[0]
             ? d.itemmarket.listings[0].price : null;
           return price != null && price > 0 ? { name, price, bb, rate: price / bb } : null;
