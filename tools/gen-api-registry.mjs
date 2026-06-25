@@ -38,7 +38,7 @@ const USED = {
   '/torn/items':            { used: ['key', 'comment'], note: 'item dictionary (type/sub_type/name; comment=rwth-items)' },
   '/torn/{id}/itemdetails': { used: ['key'], note: 'per-instance quality/bonuses/rarity' },
   '/torn/logtypes':         { used: ['key', 'comment'], note: 'logtype-id validator (comment=rwth-logtypes)' },
-  '/market/{id}/itemmarket':{ used: ['limit', 'key', 'comment'], note: 'live market comps & BB engine (comment=rwth-comps / rwth-bb)' },
+  '/market/{id}/itemmarket':{ used: ['bonus', 'limit', 'key', 'comment'], note: 'live market comps & BB engine (comment=rwth-comps / rwth-bb; bonus filters weapons, omitted for armor)' },
   '/market/auctionhouse':   { used: ['limit', 'sort', 'from', 'to', 'key', 'comment'], note: 'auction feed (auction-db backfill/poll)' },
 };
 

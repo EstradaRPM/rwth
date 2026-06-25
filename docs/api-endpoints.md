@@ -120,12 +120,12 @@ logtype-id validator (comment=rwth-logtypes).
 
 ### `GET /v2/market/{id}/itemmarket`
 
-live market comps & BB engine (comment=rwth-comps / rwth-bb).
+live market comps & BB engine (comment=rwth-comps / rwth-bb; bonus filters weapons, omitted for armor).
 
 | Param | In | Req | Type / enum | We send |
 |---|---|---|---|---|
 | `id` | path | yes | ItemId |  |
-| `bonus` | query | no | WeaponBonusEnum = Any, Double, Yellow, Orange, Red, Achilles, Assassinate, Backstab, Berserk, Bleed, Blindfire, Blindside, Bloodlust, Burn, Comeback, Conserve, Cripple, Crusher, Cupid, Deadeye, Deadly, Demoralize, Disarm, Double-edged, Double Tap, Emasculate, Empower, Eviscerate, Execute, Expose, Finale, Focus, Freeze, Frenzy, Fury, Grace, Hazardous, Home run, Irradiate, Lacerate, Motivation, Paralyze, Parry, Penetrate, Plunder, Poison, Powerful, Proficience, Puncture, Quicken, Rage, Revitalize, Roshambo, Shock, Sleep, Slow, Smash, Smurf, Specialist, Spray, Storage, Stricken, Stun, Suppress, Sure Shot, Throttle, Toxin, Warlord, Weaken, Wind-up, Wither |  |
+| `bonus` | query | no | WeaponBonusEnum = Any, Double, Yellow, Orange, Red, Achilles, Assassinate, Backstab, Berserk, Bleed, Blindfire, Blindside, Bloodlust, Burn, Comeback, Conserve, Cripple, Crusher, Cupid, Deadeye, Deadly, Demoralize, Disarm, Double-edged, Double Tap, Emasculate, Empower, Eviscerate, Execute, Expose, Finale, Focus, Freeze, Frenzy, Fury, Grace, Hazardous, Home run, Irradiate, Lacerate, Motivation, Paralyze, Parry, Penetrate, Plunder, Poison, Powerful, Proficience, Puncture, Quicken, Rage, Revitalize, Roshambo, Shock, Sleep, Slow, Smash, Smurf, Specialist, Spray, Storage, Stricken, Stun, Suppress, Sure Shot, Throttle, Toxin, Warlord, Weaken, Wind-up, Wither | ✅ |
 | `limit` | query | no | integer, default 20 | ✅ |
 | `offset` | query | no | integer, default 0 |  |
 | `timestamp` | query | no |  |  |

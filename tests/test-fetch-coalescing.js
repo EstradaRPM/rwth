@@ -107,28 +107,28 @@ test('SupabaseClient clears failed in-flight searches for retry', async () => {
 test('ListingsFetcher coalesces identical concurrent item-market fetches', async () => {
   resetCaches();
   let calls = 0;
-  globalThis.fetch = async () => {
+  // ListingsFetcher now funnels through Torn.itemMarket → gmRequest, so the
+  // transport is stubbed via the __RWTH_GM seam (#8), like every other Torn call.
+  globalThis.__RWTH_GM = (opts) => {
     calls++;
-    await new Promise(resolve => setTimeout(resolve, 5));
-    return {
-      async json() {
-        return {
-          itemmarket: {
-            listings: [
-              {
-                id: 77,
-                price: 2000,
-                item_details: {
-                  rarity: 'yellow',
-                  bonuses: [{ name: 'Deadeye', value: 25 }],
-                  stats: { quality: 12 },
-                },
+    setTimeout(() => opts.onload({
+      status: 200,
+      responseText: JSON.stringify({
+        itemmarket: {
+          listings: [
+            {
+              id: 77,
+              price: 2000,
+              item_details: {
+                rarity: 'yellow',
+                bonuses: [{ name: 'Deadeye', value: 25 }],
+                stats: { quality: 12 },
               },
-            ],
-          },
-        };
-      },
-    };
+            },
+          ],
+        },
+      }),
+    }), 5);
   };
 
   const item = {

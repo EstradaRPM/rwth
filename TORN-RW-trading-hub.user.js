@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.163
+// @version      0.3.164
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.163';
+  const SCRIPT_VERSION = '0.3.164';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1805,9 +1805,11 @@
   // ready (`ctx`) state emits an empty anchor div that render() mounts the
   // shared BadgeRenderer v2 two-tier card into post-innerHTML.
   // TEMP diag (#itemmarket-load) — render the for-sale fetch outcome as a small
-  // readable block so an empty market side shows EXACTLY why (no query / HTTP
-  // status / API error code / count at each filter). Key is already redacted at
-  // capture; this only formats. Returns '' when no diag was captured.
+  // readable block so an empty market side shows EXACTLY why (no query / a thrown
+  // transport-or-API error / count at each filter). Since the transport moved
+  // into Torn.itemMarket (#8), HTTP and API-envelope failures both surface as the
+  // client's tagged THREW line. Key is already redacted at capture; this only
+  // formats. Returns '' when no diag was captured.
   function buildListingsDebugLine(diag) {
     if (!diag || typeof diag !== 'object') return '';
     const v = x => (x == null ? '∅' : String(x));
@@ -1818,10 +1820,6 @@
     ];
     if (diag.queryable) {
       parts.push(`url=${v(diag.url)}`);
-      parts.push(`http=${v(diag.httpStatus)} ${diag.httpOk ? 'ok' : 'NOT-ok'}`);
-      if (diag.apiErrorCode != null || diag.apiErrorMsg != null) {
-        parts.push(`API ERROR code=${v(diag.apiErrorCode)} msg=${v(diag.apiErrorMsg)}`);
-      }
       parts.push(`listings raw=${v(diag.rawCount)} afterRarity=${v(diag.afterRarity)} afterLoadout=${v(diag.afterLoadout)}`);
     }
     if (diag.thrown) parts.push(`THREW: ${diag.thrown}`);
@@ -7437,6 +7435,19 @@
     items(key) {
       return this.get('/torn/items', {}, { comment: 'rwth-items', key });
     },
+    // Live item-market listings for one item id (the for-sale band + the BB
+    // engine's anchor pull). `bonus` filters weapons to a primary bonus title;
+    // armor omits it (its item id already pins its tier). `comment` defaults to
+    // rwth-comps (the ListingsFetcher caller); the BB engine passes rwth-bb. The
+    // transport + envelope unwrap live here; ListingsFetcher keeps its
+    // `#itemmarket-load` diag, the bonus/rarity/full-loadout post-filtering, and
+    // the 5-min TTL cache (#8).
+    itemMarket(id, opts) {
+      opts = opts || {};
+      return this.get('/market/' + encodeURIComponent(id) + '/itemmarket',
+        { bonus: opts.bonus, limit: opts.limit, offset: opts.offset },
+        { comment: opts.comment || 'rwth-comps', key: opts.key });
+    },
   };
 
   // ─── Buyer name resolution ───────────────────────────────────────────────
@@ -7704,8 +7715,9 @@
     /**
      * fetch(item) → Promise<{ market, bazaar }>
      * Cached 5 min by item id + bonus. Errors degrade to empty arrays. `bazaar`
-     * is always [] (see header). Uses the user's own API key via plain fetch —
-     * same pattern as the BB-rate / items-dict calls (no @connect needed).
+     * is always [] (see header). The raw transport + error-envelope unwrap go
+     * through Torn.itemMarket (#8); the diag, post-filtering, and TTL cache stay
+     * here.
      */
     async fetch(item) {
       const itemId = ListingsFetcher._resolveItemId(item);
@@ -7755,8 +7767,6 @@
           isArmor, rarity: rarity || null, bonus: bonus || null,
           wantLoadout: wantLoadout.slice(),
           queryable: false, skipReason: null, url: null,
-          httpStatus: null, httpOk: null,
-          apiErrorCode: null, apiErrorMsg: null,
           rawCount: null, afterRarity: null, afterLoadout: null, thrown: null,
         };
         try {
@@ -7772,19 +7782,18 @@
               : 'unknown'));
           }
           if (queryable) {
-            const url = `${API_BASE}/v2/market/${itemId}/itemmarket?`
+            // Transport + envelope unwrap now live in Torn.itemMarket (#8). The
+            // URL is rebuilt here solely for the diag readout (key redacted, never
+            // the live request); the client resolves the key off MEM.settings,
+            // matching the `apiKey` the guard above already validated. Armor omits
+            // the bonus filter (its item id is its tier).
+            diag.url = `${API_BASE}/v2/market/${itemId}/itemmarket?`
               + (isArmor ? '' : `bonus=${encodeURIComponent(bonus)}&`)
-              + `limit=50&key=${encodeURIComponent(apiKey)}&comment=rwth-comps`;
-            diag.url = url.replace(/key=[^&]*/, 'key=[redacted]');
-            const res = await fetch(url);
-            diag.httpStatus = res && res.status != null ? res.status : null;
-            diag.httpOk = !!(res && res.ok);
-            const d   = await res.json();
-            if (d && d.error) {
-              diag.apiErrorCode = d.error.code != null ? d.error.code : null;
-              diag.apiErrorMsg  = d.error.error || d.error.message || null;
-            }
-            if (d && !d.error && d.itemmarket && Array.isArray(d.itemmarket.listings)) {
+              + `limit=50&key=[redacted]&comment=rwth-comps`;
+            const d = await Torn.itemMarket(itemId, {
+              bonus: isArmor ? undefined : bonus, limit: 50,
+            });
+            if (d && d.itemmarket && Array.isArray(d.itemmarket.listings)) {
               market = d.itemmarket.listings
                 .map(ListingsFetcher._shapeItemMarket)
                 .filter(Boolean);

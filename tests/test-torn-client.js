@@ -206,6 +206,55 @@ test('userLog falls back to MEM.settings.apiKey and unwraps the error envelope',
   });
 });
 
+test('itemMarket(id) hits /market/{id}/itemmarket with bonus, limit, comment=rwth-comps and the key', async () => {
+  const seen = stubGM({ itemmarket: { listings: [] } });
+  await Torn.itemMarket(123, { bonus: 'Deadeye', limit: 50, key: GOOD_KEY });
+  assert.ok(seen.opts.url.includes('/v2/market/123/itemmarket?'), seen.opts.url);
+  const qp = queryParams(seen.opts.url);
+  assert.equal(qp.get('comment'), 'rwth-comps');
+  assert.equal(qp.get('key'), GOOD_KEY);
+  assert.equal(qp.get('bonus'), 'Deadeye');
+  assert.equal(qp.get('limit'), '50');
+});
+
+test('itemMarket omits bonus when not supplied (armor) and honours a comment override (BB engine)', async () => {
+  let seen = stubGM({ itemmarket: { listings: [] } });
+  await Torn.itemMarket(456, { limit: 50, key: GOOD_KEY });
+  assert.equal(queryParams(seen.opts.url).has('bonus'), false);
+
+  seen = stubGM({ itemmarket: { listings: [] } });
+  await Torn.itemMarket(789, { limit: 1, comment: 'rwth-bb', key: GOOD_KEY });
+  assert.equal(queryParams(seen.opts.url).get('comment'), 'rwth-bb');
+  assert.equal(queryParams(seen.opts.url).get('limit'), '1');
+});
+
+test('itemMarket() sends only params /market/{id}/itemmarket allows per the USED registry', async () => {
+  const gen = await import('../tools/gen-api-registry.mjs');
+  const allowed = new Set(gen.USED['/market/{id}/itemmarket'].used); // bonus,limit,key,comment
+  const seen = stubGM({ itemmarket: { listings: [] } });
+  await Torn.itemMarket(123, { bonus: 'Deadeye', limit: 50, key: GOOD_KEY });
+  for (const name of queryParams(seen.opts.url).keys()) {
+    assert.ok(allowed.has(name), `unexpected param "${name}" not in USED['/market/{id}/itemmarket']`);
+  }
+});
+
+test('itemMarket falls back to MEM.settings.apiKey, gates on hasRealApiKey, and unwraps the error envelope', async () => {
+  const seen = stubGM({ itemmarket: { listings: [] } });
+  await Torn.itemMarket(123, { limit: 50 });
+  assert.equal(queryParams(seen.opts.url).get('key'), 'SETTINGSKEY12345');
+
+  const gate = stubGM({ itemmarket: { listings: [] } });
+  await assert.rejects(Torn.itemMarket(123, { limit: 50, key: '' }), /No API key/);
+  assert.equal(gate.calls, 0);
+
+  stubGM({ error: { code: 2, error: 'Incorrect key' } });
+  await assert.rejects(Torn.itemMarket(123, { limit: 50, key: GOOD_KEY }), (err) => {
+    assert.match(err.message, /Incorrect key \(code 2\)/);
+    assert.equal(err.tornCode, 2);
+    return true;
+  });
+});
+
 // Sanity: the live userscript declares @connect api.torn.com (the one item the
 // PRD calls out to verify on auto-update).
 test('@connect api.torn.com is granted in the UserScript header', () => {
