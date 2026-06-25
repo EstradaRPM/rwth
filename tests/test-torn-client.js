@@ -255,6 +255,39 @@ test('itemMarket falls back to MEM.settings.apiKey, gates on hasRealApiKey, and 
   });
 });
 
+test('itemDetails(uid) hits /torn/{uid}/itemdetails with comment=rwth-itemdetails and the key', async () => {
+  const seen = stubGM({ itemdetails: { name: 'Riot Helmet' } });
+  const d = await Torn.itemDetails('999', GOOD_KEY);
+  assert.ok(seen.opts.url.includes('/v2/torn/999/itemdetails?'), seen.opts.url);
+  const qp = queryParams(seen.opts.url);
+  assert.equal(qp.get('comment'), 'rwth-itemdetails');
+  assert.equal(qp.get('key'), GOOD_KEY);
+  assert.equal(d.itemdetails.name, 'Riot Helmet');
+});
+
+test('itemDetails() sends only params /torn/{id}/itemdetails allows per the USED registry', async () => {
+  const gen = await import('../tools/gen-api-registry.mjs');
+  const allowed = new Set(gen.USED['/torn/{id}/itemdetails'].used); // key,comment
+  const seen = stubGM({ itemdetails: {} });
+  await Torn.itemDetails('999', GOOD_KEY);
+  for (const name of queryParams(seen.opts.url).keys()) {
+    assert.ok(allowed.has(name), `unexpected param "${name}" not in USED['/torn/{id}/itemdetails']`);
+  }
+});
+
+test('itemDetails gates on hasRealApiKey and unwraps the error envelope', async () => {
+  const gate = stubGM({ itemdetails: {} });
+  await assert.rejects(Torn.itemDetails('999', ''), /No API key/);
+  assert.equal(gate.calls, 0);
+
+  stubGM({ error: { code: 6, error: 'Incorrect ID' } });
+  await assert.rejects(Torn.itemDetails('999', GOOD_KEY), (err) => {
+    assert.match(err.message, /Incorrect ID \(code 6\)/);
+    assert.equal(err.tornCode, 6);
+    return true;
+  });
+});
+
 // Sanity: the live userscript declares @connect api.torn.com (the one item the
 // PRD calls out to verify on auto-update).
 test('@connect api.torn.com is granted in the UserScript header', () => {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.165
+// @version      0.3.166
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.165';
+  const SCRIPT_VERSION = '0.3.166';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -5567,10 +5567,9 @@
   // bonus, rarity. A failure is non-fatal — the checklist row stays editable.
   const ItemDetails = {
     async fetch(uid, key) {
-      const res = await fetch(
-        `${API_BASE}/v2/torn/${encodeURIComponent(uid)}/itemdetails?key=${encodeURIComponent(key)}`);
-      const d = await res.json();
-      if (d && d.error) throw new Error(`${d.error.error} (code ${d.error.code})`);
+      // Transport + envelope unwrap live in the client now (#10); this keeps the
+      // `.itemdetails` projection (and its null-on-absent fallback).
+      const d = await Torn.itemDetails(uid, key);
       return (d && d.itemdetails) || null;
     },
   };
@@ -7447,6 +7446,13 @@
       return this.get('/market/' + encodeURIComponent(id) + '/itemmarket',
         { bonus: opts.bonus, limit: opts.limit, offset: opts.offset },
         { comment: opts.comment || 'rwth-comps', key: opts.key });
+    },
+    // One won item's per-instance details by its unique id (quality, every
+    // bonus, rarity) — the scan-buy enrichment pull. ItemDetails.fetch owns the
+    // `.itemdetails` projection; transport + envelope unwrap live here (#10).
+    itemDetails(uid, key) {
+      return this.get('/torn/' + encodeURIComponent(uid) + '/itemdetails', {},
+        { comment: 'rwth-itemdetails', key });
     },
   };
 

@@ -36,7 +36,7 @@ const USED = {
   '/user/{id}/basic':       { used: ['key', 'comment'], note: 'buyer id → name (comment=rwth-buyer)' },
   '/user/log':              { used: ['log', 'limit', 'from', 'key', 'comment'], note: 'ledger scan (comment=rwth-scan; we also append `_` cache-buster, which is NOT a spec param)' },
   '/torn/items':            { used: ['key', 'comment'], note: 'item dictionary (type/sub_type/name; comment=rwth-items)' },
-  '/torn/{id}/itemdetails': { used: ['key'], note: 'per-instance quality/bonuses/rarity' },
+  '/torn/{id}/itemdetails': { used: ['key', 'comment'], note: 'scan-buy enrichment: per-instance quality/bonuses/rarity (comment=rwth-itemdetails)' },
   '/torn/logtypes':         { used: ['key', 'comment'], note: 'logtype-id validator (comment=rwth-logtypes)' },
   '/market/{id}/itemmarket':{ used: ['bonus', 'limit', 'key', 'comment'], note: 'live market comps & BB engine (comment=rwth-comps / rwth-bb; bonus filters weapons, omitted for armor)' },
   '/market/auctionhouse':   { used: ['limit', 'sort', 'from', 'to', 'key', 'comment'], note: 'auction feed (auction-db backfill/poll)' },
