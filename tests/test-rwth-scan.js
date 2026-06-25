@@ -315,6 +315,48 @@ test('simple RW trade becomes a buy; mixed trade stays review', () => {
   assert.strictEqual(mixed.type, 'review');
 });
 
+test('tradeUser pulls the counterparty id, prefers an id over an ambiguous name, and ignores objects', () => {
+  // Numeric id field → string id (resolved to a name downstream).
+  assert.strictEqual(P.tradeUser({ data: { user_id: 1580562 } }), '1580562');
+  assert.strictEqual(P.tradeUser({ data: { user: '1580562' } }), '1580562');
+  // A real username with no id field passes through.
+  assert.strictEqual(P.tradeUser({ data: { name: 'BuyerName' } }), 'BuyerName');
+  // An id present alongside a name (e.g. item-leg `name` is the item) → id wins.
+  assert.strictEqual(P.tradeUser({ data: { user_id: 42, name: 'Diamond Bladed Knife' } }), '42');
+  // Object/array values (e.g. data.user as a nested object) are ignored.
+  assert.strictEqual(P.tradeUser({ data: { user: { id: 7 } } }), null);
+  assert.strictEqual(P.tradeUser({ data: {} }), null);
+});
+
+test('a RW trade SALE carries the counterparty id through to the buyer', () => {
+  const sale = P.reconcileTradeGroup([
+    {
+      eventKey: '4441:item-out',
+      kind: 'tradeItem',
+      direction: 'out',
+      item: { itemId: 614, itemName: 'Diamond Bladed Knife' },
+      category: 'Melee',
+      isRw: true,
+      timestamp: 1779372185000,
+      user: '1580562',
+    },
+    {
+      eventKey: '4446:money-in',
+      kind: 'tradeMoney',
+      direction: 'in',
+      amount: 90_000_000,
+      timestamp: 1779372185000,
+      user: '1580562',
+    },
+  ], {}, cats);
+
+  assert.strictEqual(sale.type, 'sale');
+  assert.strictEqual(sale.sell.venue, 'trade');
+  assert.strictEqual(sale.sell.saleNet, 90_000_000);
+  // The blank-buyer bug: this must be the counterparty id, not null.
+  assert.strictEqual(sale.sell.buyer, '1580562');
+});
+
 test('matchSell will not close a held row against a different-uid sale', () => {
   const held = [{
     id: 'held-rw', itemName: 'Enfield SA-80', uid: 111, status: 'held', bonuses: [],

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.166
+// @version      0.3.167
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.166';
+  const SCRIPT_VERSION = '0.3.167';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1305,6 +1305,26 @@
     };
   }
 
+  // Pure: the other party to a trade, pulled off one trade-log leg. Torn names
+  // the counterparty in the leg's `data` — usually a numeric user id (the same
+  // value across all four legs of one trade), sometimes a username. We read the
+  // numeric id first because it is unambiguous: on an item leg `data.name` can
+  // be the item's name, not a person, so a bare name is only trusted when no id
+  // field is present. A numeric id is left as-is and resolved to a username
+  // downstream by resolveBuyerNames (/v2/user/{id}/basic); a real name passes
+  // straight through. Returns null when the leg carries no counterparty.
+  function tradeUser(entry) {
+    const data = (entry && entry.data) || {};
+    for (const v of [data.user_id, data.userId, data.user, data.player_id, data.playerId]) {
+      if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+      if (typeof v === 'string' && /^\d+$/.test(v.trim())) return v.trim();
+    }
+    for (const v of [data.name, data.username, data.player, data.player_name]) {
+      if (typeof v === 'string' && v.trim() && !/^\d+$/.test(v.trim())) return v.trim();
+    }
+    return null;
+  }
+
   function tradeLegFromLogEntry(entry, key, logType, itemNames, cats) {
     const text = logText(entry).toLowerCase();
     const data = (entry && entry.data) || {};
@@ -1318,11 +1338,12 @@
       : /\b(sent|gave|given|outgoing|lost|paid)\b/.test(text) ? 'out' : null;
     const group = firstText(data.trade_id, data.tradeId, data.trade, data.user_id,
       data.user, data.name, logTimestampMs(entry));
+    const user = tradeUser(entry);
     if (isMoneyType) {
       return {
         eventKey: scanEventKey(logType, key),
         logType, logId: String(key), kind: 'tradeMoney', direction: dir,
-        amount: logMoney(entry), timestamp: logTimestampMs(entry), group,
+        amount: logMoney(entry), timestamp: logTimestampMs(entry), group, user,
       };
     }
     const item = itemFromLogEntry(entry, itemNames);
@@ -1330,7 +1351,7 @@
     return {
       eventKey: scanEventKey(logType, key),
       logType, logId: String(key), kind: 'tradeItem', direction: dir,
-      item, category, isRw: isRwCategory(category), timestamp: logTimestampMs(entry), group,
+      item, category, isRw: isRwCategory(category), timestamp: logTimestampMs(entry), group, user,
     };
   }
 
@@ -1395,6 +1416,10 @@
         },
       };
     }
+    // The counterparty (our buyer) is named on either leg of the trade; prefer
+    // the money leg since the buyer is the one who paid. A numeric id resolves
+    // to a username downstream via resolveBuyerNames (/v2/user/{id}/basic).
+    const buyer = firstText(moneyLeg.user, itemLeg.user) || null;
     return {
       type: 'sale',
       eventKeys,
@@ -1404,7 +1429,7 @@
         uid: item.uid,
         bonusName: null,
         venue: 'trade',
-        buyer: null,
+        buyer,
         saleGross: moneyLeg.amount || 0,
         saleFees: 0,
         saleNet: moneyLeg.amount || 0,
@@ -10597,6 +10622,7 @@
     scanEventKey,
     classifyLogEvent,
     reconcileTradeGroup,
+    tradeUser,
     scanHitIsRwTradeable,
     buildScanPreview,
     buildScanSetup,
