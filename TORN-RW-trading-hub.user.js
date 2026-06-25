@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.162
+// @version      0.3.163
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.162';
+  const SCRIPT_VERSION = '0.3.163';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -5305,6 +5305,70 @@
     }
   }
 
+  // ─── Items dictionary — one fetch, two projections (#7) ──────────────────────
+  // Torn's /v2/torn/items is a large payload that used to be pulled three times.
+  // It now funnels through a single Torn.items() fetch whose payload feeds BOTH
+  // caches at once: rwth_items (id→name `map` + name→category `cats`, consumed by
+  // scan name resolution) and rwth_items_dict (`byName` index of
+  // type/sub_type/weapon_class/rarity, consumed by ItemClassifier). The
+  // array-vs-object shape unwrap lives in exactly one place — normalizeItems — so
+  // a future Torn shape change is a one-line fix.
+
+  // Unwrap the `items` payload (v2 array, each element id-bearing — or the legacy
+  // id-keyed object) into a flat list of records, every record carrying its own
+  // `id` (the object key is injected when a legacy value omits it).
+  function normalizeItems(d) {
+    const items = (d && d.items) || {};
+    if (Array.isArray(items)) return items.filter(Boolean);
+    return Object.keys(items)
+      .map((id) => {
+        const it = items[id];
+        if (!it) return null;
+        return it.id != null ? it : { ...it, id };
+      })
+      .filter(Boolean);
+  }
+
+  // The single fetch. Builds both projections from one normalized list and
+  // persists both. Returns { map, cats, byName } so either caller can hand back
+  // its own projection. Impure (Torn transport + Store); behind the test seam via
+  // __RWTH_GM. A failed fetch throws — callers decide the fallback.
+  async function fetchItemsBothProjections(key) {
+    const d = await Torn.items(key);
+    const list = normalizeItems(d);
+
+    // rwth_items: id→name map + name→category index (+ schema sample).
+    const map = {};
+    const cats = {};
+    const sample = [];   // TEMP: a few raw records so the real v2 schema is visible
+    for (const it of list) {
+      const name = it && it.name;
+      if (it == null || it.id == null || !name) continue;
+      map[it.id] = name;
+      const c = itemDictCategoryRecord(it);
+      if (c) cats[String(name).toLowerCase()] = c;
+      if (sample.length < 6 && (it.weapon_class || it.type)) sample.push(it);
+    }
+    Store.set('rwth_items', { schema: ITEM_DICT_SCHEMA, ts: Date.now(), map, cats, sample });
+
+    // rwth_items_dict: byName classifier index.
+    const byName = {};
+    for (const it of list) {
+      if (!it || !it.name) continue;
+      byName[it.name] = {
+        id: it.id,
+        name: it.name,
+        type: it.type || null,
+        sub_type: it.sub_type || null,
+        weapon_class: it.weapon_class || null,
+        rarity: it.rarity || null,
+      };
+    }
+    Store.set('rwth_items_dict', { ts: Date.now(), byName });
+
+    return { map, cats, byName };
+  }
+
   // ─── ItemDict — item id → name, fetched once and cached a week ───────────────
   // The auction-win log identifies items by numeric id only; this resolves the
   // names. A fetch failure is non-fatal — names just degrade to "Item #id".
@@ -5320,30 +5384,7 @@
       }
       const cachedNames = itemDictNameMapFromCache(cached);
       try {
-        const res = await fetch(`${API_BASE}/v2/torn/items?key=${encodeURIComponent(key)}`);
-        const d = await res.json();
-        if (d && d.error) throw new Error(`${d.error.error} (code ${d.error.code})`);
-        const map = {};
-        const cats = {};
-        const sample = [];   // TEMP: a few raw records so the real v2 schema is visible
-        const record = (id, item) => {
-          const name = item && item.name;
-          if (id == null || !name) return;
-          map[id] = name;
-          const c = itemDictCategoryRecord(item);
-          if (c) cats[String(name).toLowerCase()] = c;
-          if (sample.length < 6 && item && (item.weapon_class || item.type)) sample.push(item);
-        };
-        const items = d && d.items;
-        if (Array.isArray(items)) {
-          for (const it of items) if (it) record(it.id, it);
-        } else if (items && typeof items === 'object') {
-          for (const id of Object.keys(items)) {
-            const it = items[id];
-            if (it) record(id, it);
-          }
-        }
-        Store.set('rwth_items', { schema: ITEM_DICT_SCHEMA, ts: Date.now(), map, cats, sample });
+        const { map } = await fetchItemsBothProjections(key);
         return map;
       } catch (err) {
         if (cachedNames) return cachedNames;
@@ -5464,27 +5505,8 @@
       }
       const key = (MEM.settings && MEM.settings.apiKey || '').trim();
       if (!hasRealApiKey(key)) return null;
-      const res = await fetch(`${API_BASE}/v2/torn/items?key=${encodeURIComponent(key)}`);
-      const d = await res.json();
-      if (d && d.error) throw new Error(`${d.error.error} (code ${d.error.code})`);
-      const byName = {};
-      const record = (it) => {
-        if (!it || !it.name) return;
-        byName[it.name] = {
-          id: it.id,
-          name: it.name,
-          type: it.type || null,
-          sub_type: it.sub_type || null,
-          weapon_class: it.weapon_class || null,
-          rarity: it.rarity || null,
-        };
-      };
-      const items = d && d.items;
-      if (Array.isArray(items)) items.forEach(record);
-      else if (items && typeof items === 'object') {
-        for (const id of Object.keys(items)) record(items[id]);
-      }
-      Store.set('rwth_items_dict', { ts: Date.now(), byName });
+      // One fetch, both projections (#7): this also refreshes rwth_items.
+      const { byName } = await fetchItemsBothProjections(key);
       return byName;
     },
   };
@@ -7408,6 +7430,13 @@
       if (from != null) params.from = from;
       return this.get('/user/log', params, { comment: 'rwth-scan', key });
     },
+    // Torn's full item dictionary (id/name/type/sub_type/weapon_class/rarity).
+    // Fetched once and fanned out to BOTH item caches — the id→name map
+    // (rwth_items) and the byName classifier index (rwth_items_dict) — by
+    // fetchItemsBothProjections; normalizeItems owns the shape unwrap (#7).
+    items(key) {
+      return this.get('/torn/items', {}, { comment: 'rwth-items', key });
+    },
   };
 
   // ─── Buyer name resolution ───────────────────────────────────────────────
@@ -8855,15 +8884,14 @@
         let cacheIds = Store.get('rwth_bb_cache_ids') || {};
         const missing = cacheNames.filter(n => !cacheIds[n]);
         if (missing.length) {
-          const r = await fetch(`${API_BASE}/v2/torn/items?key=${encodeURIComponent(key)}&comment=rwth-bb`);
-          const d = await r.json();
-          if (d && d.error) { MEM.fetchError = `BB items: ${d.error.error}`; return null; }
-          // v2 /torn/items returns `items` as an array (each element carries its
-          // own id), but tolerate the legacy id-keyed object shape too.
-          const items = (d && d.items) || {};
-          const list = Array.isArray(items) ? items : Object.values(items);
-          for (const it of list) {
-            if (it && it.name && cacheNames.includes(it.name)) cacheIds[it.name] = parseInt(it.id, 10);
+          // Resolve names→ids off the shared items-dict (#7) instead of a third
+          // /torn/items pull — fetchItemsDict reuses the cached byName index (or
+          // does the one fetch that also refreshes rwth_items).
+          const byName = await ItemClassifier.fetchItemsDict();
+          if (!byName) { MEM.fetchError = 'BB items: no item dictionary'; return null; }
+          for (const name of cacheNames) {
+            const rec = byName[name];
+            if (rec && rec.id != null) cacheIds[name] = parseInt(rec.id, 10);
           }
           const stillMissing = cacheNames.filter(n => !cacheIds[n]);
           if (stillMissing.length) {
@@ -10602,6 +10630,8 @@
     itemDictCategoryRecord,
     itemDictCacheUsable,
     itemDictNameMapFromCache,
+    normalizeItems,
+    ItemDict,
     selectedScanLogTypes,
     mergeLadder,
     hasRealApiKey,

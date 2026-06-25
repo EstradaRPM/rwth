@@ -35,7 +35,7 @@ const USED = {
   '/user':                  { used: ['key', 'comment'], note: 'API-key validation (comment=rwth-test)' },
   '/user/{id}/basic':       { used: ['key', 'comment'], note: 'buyer id → name (comment=rwth-buyer)' },
   '/user/log':              { used: ['log', 'limit', 'from', 'key', 'comment'], note: 'ledger scan (comment=rwth-scan; we also append `_` cache-buster, which is NOT a spec param)' },
-  '/torn/items':            { used: ['key'], note: 'item dictionary (type/sub_type/name)' },
+  '/torn/items':            { used: ['key', 'comment'], note: 'item dictionary (type/sub_type/name; comment=rwth-items)' },
   '/torn/{id}/itemdetails': { used: ['key'], note: 'per-instance quality/bonuses/rarity' },
   '/torn/logtypes':         { used: ['key', 'comment'], note: 'logtype-id validator (comment=rwth-logtypes)' },
   '/market/{id}/itemmarket':{ used: ['limit', 'key', 'comment'], note: 'live market comps & BB engine (comment=rwth-comps / rwth-bb)' },

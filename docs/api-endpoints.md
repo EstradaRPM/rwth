@@ -87,14 +87,14 @@ ledger scan (comment=rwth-scan; we also append `_` cache-buster, which is NOT a 
 
 ### `GET /v2/torn/items`
 
-item dictionary (type/sub_type/name).
+item dictionary (type/sub_type/name; comment=rwth-items).
 
 | Param | In | Req | Type / enum | We send |
 |---|---|---|---|---|
 | `cat` | query | no | TornItemCategory = All, Alcohol, Armor, Artifact, Book, Booster, Candy, Car, Clothing, Collectible, Defensive, Drug, Energy Drink, Enhancer, Flower, Jewelry, Material, Medical, Melee, Other, Plushie, Primary, Secondary, Special, Supply Pack, Temporary, Tool, Unused, Weapon |  |
 | `sort` | query | no | string (DESC, ASC), default ASC |  |
 | `timestamp` | query | no |  |  |
-| `comment` | query | no | string |  |
+| `comment` | query | no | string | ✅ |
 | `key` | query | no | string | ✅ |
 
 ### `GET /v2/torn/{id}/itemdetails`
