@@ -198,13 +198,35 @@ test('ROI.compute returns null when the item is not sold', () => {
   assert.strictEqual(ROI.compute(null), null);
 });
 
-test('buildLedgerTab renders an + add button and a status filter', () => {
+test('buildLedgerTab renders the ⚙ scan-settings toggle and status filters', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
   const html = buildLedgerTab({ ledger: { items: [], statusFilter: 'all' } });
-  assert.match(html, /data-action="add-item"/);
+  // #19 — the standalone "+ add" button moved into the ⚙ popup; the bar keeps
+  // Refresh + the gear toggle.
+  assert.match(html, /data-action="toggle-scan-settings"/);
+  assert.doesNotMatch(html, /data-action="add-item"/);
   for (const f of ['all', 'held', 'listed', 'sold']) {
     assert.match(html, new RegExp(`data-filter="${f}"`));
   }
+});
+
+test('buildLedgerTab exposes the relocated entry points only when the ⚙ popup is open', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const closed = buildLedgerTab({ ledger: { items: [], statusFilter: 'all' } });
+  // Popup closed: neither the standalone add nor the paste-sale box render, and
+  // the popup dialog itself is absent (the gear toggle still carries its label).
+  assert.doesNotMatch(closed, /data-action="add-item"/);
+  assert.doesNotMatch(closed, /data-sell-input/);
+  assert.doesNotMatch(closed, /data-action="close-scan-settings"/);
+  const open = buildLedgerTab({
+    ledger: { items: [], statusFilter: 'all' },
+    ui: { scanSettingsOpen: true },
+  });
+  assert.match(open, /role="dialog" aria-label="Scan settings"/);
+  assert.match(open, /data-action="add-item"/);
+  assert.match(open, /data-scan-source="buys"/);
+  assert.match(open, /data-scan-back-to/);
+  assert.match(open, /data-sell-input/);
 });
 
 test('buildLedgerTab renders a row per item with name, bonus and price', () => {
@@ -239,8 +261,8 @@ test('buildLedgerTab keeps status filters separate from ledger actions', () => {
   assert.match(html, /held: \$600k cost/);
   assert.match(html, /listed: \$118m at ask/);
   assert.match(html, /data-sort-select aria-label="sort ledger"/);
-  assert.match(html, /data-action="scan"/);
-  assert.match(html, /data-action="add-item"/);
+  assert.match(html, /data-action="refresh"/);
+  assert.match(html, /data-action="toggle-scan-settings"/);
 });
 
 test('buildLedgerDashboard renders solid realized and dashed projected chart lines', () => {
@@ -505,9 +527,12 @@ test('buildScanChecklist is empty with no results', () => {
   assert.strictEqual(buildScanChecklist({}), '');
 });
 
-test('buildLedgerTab renders a Scan button and surfaces fetchError', () => {
+test('buildLedgerTab renders the Refresh + ⚙ bar and surfaces fetchError', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
-  assert.match(buildLedgerTab({ ledger: { items: [] } }), /data-action="scan"/);
+  const bar = buildLedgerTab({ ledger: { items: [] } });
+  assert.match(bar, /data-action="refresh"/);
+  assert.match(bar, /data-action="toggle-scan-settings"/);
+  assert.doesNotMatch(bar, /data-action="scan"/);
   const err = buildLedgerTab({ ledger: { items: [] }, fetchError: 'API error: x' });
   assert.match(err, /rwth-banner/);
   assert.match(err, /API error: x/);
@@ -810,9 +835,14 @@ test('buildSellBox renders the confirmation summary when a preview is staged', (
   assert.match(html, /data-action="cancel-sells"/);
 });
 
-test('buildLedgerTab includes the Log-a-sale box', () => {
+test('buildLedgerTab relocates the Log-a-sale box into the ⚙ popup', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
-  assert.match(buildLedgerTab({ ledger: { items: [] } }), /data-sell-input/);
+  // #19 — no longer an always-visible collapsible in the tab body...
+  assert.doesNotMatch(buildLedgerTab({ ledger: { items: [] } }), /data-sell-input/);
+  // ...it lives inside the ⚙ scan-settings popup.
+  const open = buildLedgerTab({ ledger: { items: [] }, ui: { scanSettingsOpen: true } });
+  assert.match(open, /data-sell-input/);
+  assert.match(open, /data-action="parse-sells"/);
 });
 
 // ── Advertise (slice 6) ──────────────────────────────────────────────────────

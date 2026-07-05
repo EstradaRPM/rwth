@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.173
+// @version      0.3.174
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.173';
+  const SCRIPT_VERSION = '0.3.174';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -425,8 +425,12 @@
       // #361 — selected period for the projection popup/chart display.
       projectionPeriod: 'month', // 'day' | 'week' | 'month' | 'quarter' | 'year'
       projectionPanelOpen: false,
-      // Per-section fold state, persisted under rwth_collapsed. Outputs and the
-      // sale-log box start collapsed; the advertised-items list starts open.
+      // #19 — the ⚙ scan-settings popup (sources / scan-back-to / add-item /
+      // paste-sale). Toggled from the ledger bar; owns the relocated entry points.
+      scanSettingsOpen: false,
+      // Per-section fold state, persisted under rwth_collapsed. Outputs start
+      // collapsed; the advertised-items list and the relocated (#19) paste-sale
+      // box (now inside the ⚙ popup) start open.
       collapsed: {
         // #324 — Advertise hub bars. The pivotal items area opens by default;
         // the set-once branding/copy folds (brandLook, postText), the optional
@@ -436,7 +440,7 @@
         // #325 — the unified "Copy to Torn" section now carries the live preview
         // (it used to be its own always-open section), so it starts open.
         advImagesAdv: true, advOutputs: false,
-        saleLog: true, analytics: true,
+        saleLog: false, analytics: true,
         // #14 — dismissed-scan-rows drawer folds by default (recovery is rare).
         scanDismissed: true,
         // Ledger dashboard charts drawer (cards + hero + analytics) folds by
@@ -466,7 +470,6 @@
       scanResults: [],        // ScanHit[] from the last scan, awaiting confirm
       scanPreview: null,      // null | staged non-editable sale/mug/review import summary
       scanDebugSummary: [],    // string[] compact debug readout for PDA screenshots
-      scanSetupOpen: false,   // whether the compact scan setup panel is open
       scanMessage: '',        // transient scan feedback (e.g. "No new auction wins found.")
       scanning: false,        // a scan request is in flight
       lastScan: 0,            // epoch ms of the last completed scan
@@ -2244,18 +2247,14 @@
 
   function buildScanChecklist(mem) {
     const L = (mem && mem.ledger) || {};
-    const settings = (mem && mem.settings) || MEM.settings;
-    const scanSources = { ...DEFAULT_SCAN_SOURCES, ...(settings.scanSources || {}) };
-    const scanBackTo = settings.scanBackTo || '';
     const results = L.scanResults || [];
     const preview = L.scanPreview;
-    const setup = L.scanSetupOpen ? buildScanSetup(scanSources, scanBackTo, !!L.scanning) : '';
     const staged = preview ? buildScanPreviewUi(preview, results.length) : '';
     const debugSummary = Array.isArray(L.scanDebugSummary) ? L.scanDebugSummary : [];
     const debugUi = buildScanDebugSummaryUi(debugSummary);
     const foldCollapsed = ((mem && mem.ui && mem.ui.collapsed) || {});
     const dismissedUi = buildDismissedUi(L.dismissed, foldCollapsed.scanDismissed !== false);
-    if (!results.length && !setup && !staged && !debugUi && !dismissedUi) return '';
+    if (!results.length && !staged && !debugUi && !dismissedUi) return '';
     const n = results.length;
     const buyRows = results.length ? `
       <div class="rwth-form-title">${n} RW buy${n === 1 ? '' : 's'} ready</div>
@@ -2268,7 +2267,6 @@
         <button class="rwth-btn rwth-btn-ghost" type="button" data-action="cancel-scan">Cancel</button>
       </div>` : '';
     return `<div class="rwth-scan">
-      ${setup}
       ${staged}
       ${buyRows}
       ${dismissedUi}
@@ -2300,13 +2298,29 @@
     </div>`;
   }
 
-  function buildScanSetup(scanSources, scanBackTo, scanning) {
+  // #19 — the ⚙ scan-settings popup. Consolidates the retired standalone entry
+  // points ("Scan logs" setup panel, "+ add" button, always-visible "Log a sale"
+  // box) into one anchored panel that Refresh (the primary scan trigger) reads
+  // its settings from. Reuses the rwth-projection-pop shell (bordered card + head
+  // with a × close). Sources + scan-back-to persist via syncScanSettings; "+ add
+  // item" and the relocated buildSellBox keep their existing data-action handlers,
+  // so this is relocation, not rewrite. Pure — exposed via __RwthPure (ADR-0002).
+  function buildScanSettingsPopup(mem) {
+    const settings = (mem && mem.settings) || MEM.settings;
+    const scanSources = { ...DEFAULT_SCAN_SOURCES, ...(settings.scanSources || {}) };
+    const scanBackTo = settings.scanBackTo || '';
     const toggle = (key, label) => `<label class="rwth-scan-source">
       <input type="checkbox" data-scan-source="${key}"${scanSources[key] !== false ? ' checked' : ''}>
       <span>${label}</span>
     </label>`;
-    return `<div class="rwth-scan-setup">
-      <div class="rwth-form-title">Scan RW logs</div>
+    return `<div class="rwth-projection-pop rwth-scan-settings" role="dialog" aria-label="Scan settings">
+      <div class="rwth-projection-pop-head">
+        <div>
+          <span>Scan settings</span>
+          <small>Pick which logs Refresh pulls and how far back — or add a buy / paste a sale by hand.</small>
+        </div>
+        <button class="rwth-icon-btn" type="button" data-action="close-scan-settings" aria-label="Close scan settings" title="Close">×</button>
+      </div>
       <label class="rwth-field">
         <span class="rwth-field-label">Scan back to</span>
         <input class="rwth-field-input" type="date" data-scan-back-to value="${escapeAttr(scanBackTo)}">
@@ -2319,9 +2333,9 @@
       </div>
       <div class="rwth-scan-note">RW weapons and armor only. Trade baskets with extra goods stay out of the ledger.</div>
       <div class="rwth-form-actions">
-        <button class="rwth-btn" type="button" data-action="run-scan"${scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : 'Run scan'}</button>
-        <button class="rwth-btn rwth-btn-ghost" type="button" data-action="close-scan-setup">Close</button>
+        <button class="rwth-btn rwth-btn-add" type="button" data-action="add-item">+ add item</button>
       </div>
+      ${buildSellBox(mem)}
     </div>`;
   }
 
@@ -3205,6 +3219,7 @@
     const scanning = !!L.scanning;
     const err = mem && mem.fetchError;
     const fold = (mem && mem.ui && mem.ui.collapsed) || {};
+    const settingsOpen = !!(mem && mem.ui && mem.ui.scanSettingsOpen);
     return `<div class="rwth-ledger">
       ${buildLedgerDashboard(items, now, fold.analytics, stats, mem && mem.ui)}
       <div class="rwth-ledger-bar">
@@ -3216,17 +3231,16 @@
           ${sortSel}
           <button class="rwth-btn" type="button" data-action="refresh"${
             scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : '⟳ Refresh'}</button>
-          <button class="rwth-btn rwth-btn-ghost" type="button" data-action="scan"${
-            scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : 'Scan logs'}</button>
-          <button class="rwth-btn rwth-btn-add" type="button" data-action="add-item">+ add</button>
+          <button class="rwth-btn rwth-btn-ghost rwth-btn-gear" type="button" data-action="toggle-scan-settings"
+            aria-label="Scan settings" title="Scan settings" aria-expanded="${settingsOpen ? 'true' : 'false'}">⚙</button>
         </div>
       </div>
       <div class="rwth-scan-status">${escapeAttr(formatLastScanned(L.lastScan, now))}</div>
+      ${settingsOpen ? buildScanSettingsPopup(mem) : ''}
       ${err ? `<div class="rwth-form-error rwth-banner">${escapeAttr(err)}</div>` : ''}
       ${L.scanMessage && !err ? `<div class="rwth-placeholder">${escapeAttr(L.scanMessage)}</div>` : ''}
       ${buildScanChecklist(mem)}
       ${L.editingId ? buildLedgerForm(mem) : ''}
-      ${buildSellBox(mem)}
       ${sorted.length ? buildLedgerHeader(filter) : ''}
       <div class="rwth-rows">${list}</div>
     </div>`;
@@ -4756,10 +4770,9 @@
         case 'edit-item':     setState({ ledger: { ...MEM.ledger, editingId: id, expandedId: id } }); break;
         case 'cancel-item':   setState({ ledger: { ...MEM.ledger, editingId: null } }); break;
         case 'save-item':     saveLedgerItem(); break;
-        case 'scan':          setState({ ledger: { ...MEM.ledger, scanSetupOpen: true } }); break;
         case 'refresh':       LogScanner.scan(); break;
-        case 'run-scan':      LogScanner.scan(); break;
-        case 'close-scan-setup': setState({ ledger: { ...MEM.ledger, scanSetupOpen: false } }); break;
+        case 'toggle-scan-settings': setState({ ui: { ...MEM.ui, scanSettingsOpen: !MEM.ui.scanSettingsOpen } }); break;
+        case 'close-scan-settings':  setState({ ui: { ...MEM.ui, scanSettingsOpen: false } }); break;
         case 'confirm-scan':  confirmScan(); break;
         case 'scan-restore':  restoreDismissed(actionEl.dataset.keys); break;
         case 'cancel-scan':   Store.set('rwth_scan', []);
@@ -5943,16 +5956,22 @@
     return Number.isFinite(t) ? Math.floor(t / 1000) : null;
   }
 
-  // #16 — pure cutoff selector (ADR-0002): resolves the scan window's lower bound
-  // as a unix-seconds cutoff. Since-last-scan is the default — a completed scan's
-  // lastScan (epoch ms) becomes the next scan's floor, so Refresh only pulls new
-  // events. First run / no lastScan falls back to the manual "scan back to" date,
-  // and absent that, null (the full default window, bounded only by
-  // SCAN_LOG_LIMIT). Exposed via __RwthPure for the Node test seam.
+  // #16/#19 — pure cutoff selector (ADR-0002): resolves the scan window's lower
+  // bound as a unix-seconds cutoff. Since-last-scan is the fast default — a
+  // completed scan's lastScan (epoch ms) becomes the next scan's floor, so Refresh
+  // only pulls new events. But an EXPLICITLY-SET "scan back to" date can force a
+  // DEEPER window: the effective cutoff is the EARLIER (smaller unix) of the
+  // lastScan floor and the back-to date, so a user who asks to reach further back
+  // than the last scan gets it. A back-to date LATER than lastScan leaves the fast
+  // since-last-scan floor untouched. No back-to → lastScan; neither → null (the
+  // full default window, bounded only by SCAN_LOG_LIMIT). Exposed via __RwthPure.
   function resolveScanCutoffUnix(lastScan, scanBackTo) {
     const last = Number(lastScan);
-    if (Number.isFinite(last) && last > 0) return Math.floor(last / 1000);
-    return scanCutoffUnix(scanBackTo);
+    const lastFloor = Number.isFinite(last) && last > 0 ? Math.floor(last / 1000) : null;
+    const backTo = scanCutoffUnix(scanBackTo);
+    if (lastFloor != null && backTo != null) return Math.min(lastFloor, backTo);
+    if (lastFloor != null) return lastFloor;
+    return backTo;
   }
 
   async function fetchLogType(logType, key, cutoffUnix) {
@@ -6210,7 +6229,7 @@
       setState({
         fetchError: null,
         ledger: {
-          ...MEM.ledger, scanning: false, scanSetupOpen: false,
+          ...MEM.ledger, scanning: false,
           scanResults: keptBuys, scanPreview: staged, scanDebugSummary, lastScan: scanCompletedAt,
           scanMessage: failedLogs.length
             ? `Scan finished with skipped logs: ${scanLogFailureSummary(failedLogs)}`
@@ -6915,11 +6934,15 @@
         display: flex; flex-direction: column; gap: var(--rwth-gap-md);
         border: 1px solid var(--rwth-border); border-radius: 6px; padding: var(--rwth-pad-card);
       }
-      .rwth-scan-setup,
+      .rwth-scan-settings,
       .rwth-scan-preview,
       .rwth-scan-section {
         display: flex; flex-direction: column; gap: var(--rwth-gap-sm);
       }
+      /* #19 — the ⚙ scan-settings popup reuses the projection-pop shell; its
+         relocated sellbox drops its own border so it reads as one panel. */
+      .rwth-scan-settings .rwth-sellbox { border: 0; padding: 0; }
+      .rwth-btn-gear { padding-left: 9px; padding-right: 9px; }
       .rwth-scan-sources,
       .rwth-scan-chips {
         display: flex; flex-wrap: wrap; gap: 6px;
@@ -10963,7 +10986,7 @@
     scanHitIsRwTradeable,
     buildScanPreview,
     buildScanPreviewUi,
-    buildScanSetup,
+    buildScanSettingsPopup,
     buildDismissedUi,
     normalizeDismissedList,
     dismissedKeySet,

@@ -84,19 +84,25 @@ test('classifyLogEvent parses buy logs from action text when data.item is absent
   assert.strictEqual(row.hit.category, 'Melee');
 });
 
-test('buildScanSetup renders a compact date and source selector', () => {
-  const html = P.buildScanSetup(
-    { buys: true, sales: true, trades: false, mugs: true },
-    '2026-06-01',
-    false,
-  );
+test('buildScanSettingsPopup renders the relocated sources, back-to, add-item and paste-sale affordances', () => {
+  const html = P.buildScanSettingsPopup({
+    settings: { scanSources: { buys: true, sales: true, trades: false, mugs: true }, scanBackTo: '2026-06-01' },
+    ledger: {},
+  });
+  // Source checkboxes (with sync attributes) + scan-back-to override.
   assert.match(html, /data-scan-back-to/);
   assert.match(html, /value="2026-06-01"/);
   assert.match(html, /data-scan-source="buys" checked/);
   assert.match(html, /data-scan-source="sales" checked/);
   assert.match(html, /data-scan-source="trades"/);
   assert.doesNotMatch(html, /data-scan-source="trades" checked/);
-  assert.match(html, /data-action="run-scan"/);
+  // The two manual fallbacks: "+ add item" and the relocated paste-sale box.
+  assert.match(html, /data-action="add-item"/);
+  assert.match(html, /data-sell-input/);
+  assert.match(html, /data-action="parse-sells"/);
+  // A close control, and no retired Run-scan / Scan-logs trigger.
+  assert.match(html, /data-action="close-scan-settings"/);
+  assert.doesNotMatch(html, /data-action="run-scan"/);
 });
 
 test('scan log failure summary names the failing source', () => {
@@ -639,13 +645,32 @@ test('selectScanSales imports checked sales and leaves default (undefined) sales
 
 // ─── S4 (#16) — Refresh window selection + "last scanned X ago" status ───────
 
-test('resolveScanCutoffUnix uses lastScan (since-last-scan) when present', () => {
-  const lastScan = Date.UTC(2026, 5, 20, 12, 0, 0);   // epoch ms
-  // lastScan wins over a manual back-to date; result is unix seconds.
+test('resolveScanCutoffUnix keeps the since-last-scan floor when back-to is LATER than lastScan', () => {
+  const lastScan = Date.UTC(2026, 0, 1, 12, 0, 0);   // epoch ms — Jan 1
+  // #19 — a back-to date newer than lastScan must not shrink the window: the
+  // earlier (smaller unix) of the two floors wins, i.e. the since-last-scan floor.
   assert.strictEqual(
-    P.resolveScanCutoffUnix(lastScan, '2026-01-01'),
+    P.resolveScanCutoffUnix(lastScan, '2026-06-01'),
     Math.floor(lastScan / 1000),
   );
+});
+
+test('resolveScanCutoffUnix lets an EARLIER back-to date force a deeper window than lastScan', () => {
+  const lastScan = Date.UTC(2026, 5, 20, 12, 0, 0);  // epoch ms — Jun 20
+  // #19 — the explicit override reaches further back than the last scan, so it
+  // wins (the earlier unix floor). This is the S4 review fix: the override is no
+  // longer a no-op once a scan has run.
+  assert.strictEqual(
+    P.resolveScanCutoffUnix(lastScan, '2026-01-01'),
+    P.scanCutoffUnix('2026-01-01'),
+  );
+  assert.ok(P.scanCutoffUnix('2026-01-01') < Math.floor(lastScan / 1000));
+});
+
+test('resolveScanCutoffUnix falls back to lastScan when no back-to date is set', () => {
+  const lastScan = Date.UTC(2026, 5, 20, 12, 0, 0);
+  assert.strictEqual(P.resolveScanCutoffUnix(lastScan, ''), Math.floor(lastScan / 1000));
+  assert.strictEqual(P.resolveScanCutoffUnix(lastScan, 'not-a-date'), Math.floor(lastScan / 1000));
 });
 
 test('resolveScanCutoffUnix falls back to scanBackTo on first run (no lastScan)', () => {
