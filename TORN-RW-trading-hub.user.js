@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.169
+// @version      0.3.170
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.169';
+  const SCRIPT_VERSION = '0.3.170';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1563,7 +1563,7 @@
     const txSeen = new Set(txs.map(txKey));
     const preview = {
       buys: [], sales: [], mugs: [], review: [], ignored: [], already: [],
-      eventKeys: [],
+      eventKeys: [], mugSuppress: [],
     };
     const tradeGroups = new Map();
     const addEventKeys = (keys) => {
@@ -1630,9 +1630,20 @@
         }
         addEventKeys(eventKeys);
       } else if (row.type === 'mug') {
-        // Mugs are flat cash, not tied to any item — just stage the amount.
-        preview.mugs.push({ mug: row.mug || {}, checked: true, eventKeys });
-        addEventKeys(eventKeys);
+        // #15/B3 — $0 mugs carry no P/L. They were previously staged, skipped at
+        // commit, and recorded nowhere → they re-surfaced in every scan preview.
+        // Never stage them: the amount filter drops them on every pass (mugs
+        // re-fetch even when seen, so a seen-set gate would wrongly trap a dropped
+        // real mug). Surface their keys so the commit records them in the seen-set
+        // too (bookkeeping — they hold no information worth restoring).
+        const mug = row.mug || {};
+        if ((Number(mug.amount) || 0) <= 0) {
+          for (const k of eventKeys) if (k) preview.mugSuppress.push(k);
+        } else {
+          // Mugs are flat cash, not tied to any item — just stage the amount.
+          preview.mugs.push({ mug, checked: true, eventKeys });
+          addEventKeys(eventKeys);
+        }
       } else if (row.type === 'ignored') {
         preview.ignored.push(row);
         addEventKeys(eventKeys);
@@ -5984,6 +5995,7 @@
         ignored: preview.ignored,
         already: preview.already,
         eventKeys: preview.eventKeys,
+        mugSuppress: preview.mugSuppress,
       });
       const hits = preview.buys || [];
 
@@ -6179,6 +6191,10 @@
       if (dismissedKeys.has(String(k))) continue;
       seenKeys.add(k);
     }
+    // #15/B3 — $0 mugs never stage, so they carry no checked row to commit; record
+    // their keys straight into the seen-set (the one mug case that belongs there —
+    // they hold no information worth restoring) so they never re-appear.
+    for (const k of (preview && preview.mugSuppress) || []) if (k) seenKeys.add(k);
     Store.set('rwth_seen_log_events', scanSeenStoreFromKeys([...seenKeys]));
     Store.set('rwth_seen_wins', [...oldWins]);
     Store.set('rwth_scan', []);

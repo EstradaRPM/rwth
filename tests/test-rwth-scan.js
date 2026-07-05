@@ -495,6 +495,29 @@ test('unchecked mug is dismissed and absent from the next preview', () => {
   assert.strictEqual(preview2.already.length, 1);
 });
 
+test('$0 mug is silently filtered from the preview and never reappears on rescan (#15)', () => {
+  const mug = P.classifyLogEvent({
+    id: 'mug-zero',
+    timestamp: 1779372300,
+    data: { cash: 0, attacker: 'Mugger' },
+  }, P.SCAN_LOG_TYPES.mugged, 'mug-zero', {}, {});
+
+  const preview1 = P.buildScanPreview([mug], { cats: {}, items: [], transactions: [] });
+  // Never staged — not under mugs, not in review/ignored the user would see.
+  assert.strictEqual(preview1.mugs.length, 0);
+  // Its key is surfaced for the commit to record in the seen-set (fixes B3).
+  assert.deepStrictEqual(preview1.mugSuppress, [P.scanEventKey(P.SCAN_LOG_TYPES.mugged, 'mug-zero')]);
+
+  // Rescan (mugs re-fetch even when in the seen-set, so an earlier-dropped real
+  // mug can backfill): the amount filter drops the $0 mug on every pass, so it
+  // stays absent from the preview no matter how many times it is re-seen.
+  const preview2 = P.buildScanPreview([mug], {
+    cats: {}, items: [], transactions: [],
+    seen: { [P.SCAN_LOG_TYPES.mugged]: ['mug-zero'] },
+  });
+  assert.strictEqual(preview2.mugs.length, 0);
+});
+
 test('mergeDismissals dedupes by shared eventKey and normalizeDismissedList drops junk', () => {
   const a = { eventKeys: ['4320:x'], type: 'buy', itemName: 'Knife', amount: 5, timestamp: 1 };
   const merged = P.mergeDismissals([a], [a, { eventKeys: ['4322:y'], type: 'sale' }]);
