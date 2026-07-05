@@ -604,3 +604,47 @@ test('buildLedgerTab status line reflects a prior scan', () => {
   });
   assert.match(html, /Last scanned 2 minutes ago/);
 });
+
+// ─── S6 (#17): page-full warning ─────────────────────────────────────────────
+
+test('pageFullWarnings fires at exactly the log limit, not below', () => {
+  // 99 entries: under the cap → no warning.
+  assert.deepStrictEqual(P.pageFullWarnings({ 'auction buys': 99 }, 100), []);
+  // Exactly 100: at the cap → one warning naming the type and advising action.
+  const at = P.pageFullWarnings({ 'auction buys': 100 }, 100);
+  assert.strictEqual(at.length, 1);
+  assert.match(at[0], /^auction buys hit the 100-log limit/);
+  assert.match(at[0], /narrow the window or rescan later/);
+});
+
+test('pageFullWarnings warns each capped type and ignores under-cap types', () => {
+  const out = P.pageFullWarnings(
+    { 'auction buys': 100, 'item market buys': 42, 'mugs': 100 }, 100);
+  assert.strictEqual(out.length, 2);
+  assert.ok(out.some(w => w.startsWith('auction buys hit')));
+  assert.ok(out.some(w => w.startsWith('mugs hit')));
+  assert.ok(!out.some(w => w.startsWith('item market buys')));
+});
+
+test('pageFullWarnings is empty for empty/invalid input', () => {
+  assert.deepStrictEqual(P.pageFullWarnings({}, 100), []);
+  assert.deepStrictEqual(P.pageFullWarnings(null, 100), []);
+  assert.deepStrictEqual(P.pageFullWarnings({ 'auction buys': 100 }, 0), []);
+});
+
+test('buildScanChecklist renders page-full warnings non-blockingly in the preview', () => {
+  const html = P.buildScanChecklist({
+    ledger: {
+      scanResults: [],
+      scanPreview: {
+        summary: { buys: 0, sales: 0, mugs: 0, review: 0, ignored: 0, already: 0 },
+        buys: [], sales: [], mugs: [], review: [], ignored: [],
+        warnings: P.pageFullWarnings({ 'auction buys': 100 }, 100),
+      },
+    },
+  });
+  assert.match(html, /rwth-scan-warning/);
+  assert.match(html, /auction buys hit the 100-log limit/);
+  // Non-blocking: the Commit import action still renders alongside the warning.
+  assert.match(html, /data-action="confirm-scan"/);
+});

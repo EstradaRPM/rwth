@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.171
+// @version      0.3.172
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.171';
+  const SCRIPT_VERSION = '0.3.172';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -2326,8 +2326,12 @@
       `<div class="rwth-scan-line"><span>${escapeAttr(r.reason || r.type || 'Needs review')}</span><span></span><span>skipped</span></div>`).join('');
     const ignored = (preview.ignored || []).slice(0, 3).map(r =>
       `<div class="rwth-scan-line"><span>${escapeAttr(r.itemName || r.reason || 'Ignored')}</span><span></span><span>ignored</span></div>`).join('');
+    // #17 — non-blocking page-full warnings surfaced above the preview lists.
+    const warnings = (preview.warnings || []).map(w =>
+      `<div class="rwth-scan-warning">⚠ ${escapeAttr(w)}</div>`).join('');
     return `<div class="rwth-scan-preview">
       <div class="rwth-form-title">Import preview</div>
+      ${warnings ? `<div class="rwth-scan-warnings">${warnings}</div>` : ''}
       <div class="rwth-scan-chips">
         ${chip('buys', buyCount || s.buys)}${chip('sales', s.sales)}${chip('mugs', s.mugs)}
         ${chip('review', s.review)}${chip('ignored', s.ignored)}${chip('already', s.already)}
@@ -5856,6 +5860,26 @@
     return rows.map(f => `${scanLogTypeLabel(f.logType)}: ${f.error || 'unknown error'}`).join('; ');
   }
 
+  // #17 — S6 page-full warning (ADR-0002). Torn caps each log fetch at
+  // SCAN_LOG_LIMIT entries and this slice does not paginate, so a page that
+  // comes back exactly full may be silently truncated — deeper events beyond the
+  // cap are missing. Given per-type raw entry counts (label -> count), emit one
+  // non-blocking warning line per log type that hit the cap. Fires at exactly the
+  // limit (>=), never below. Returns an array of strings (empty when nothing hit
+  // the cap). Pure — exposed via __RwthPure for the Node test seam.
+  function pageFullWarnings(countsByType, limit) {
+    const cap = Number(limit);
+    if (!Number.isFinite(cap) || cap <= 0) return [];
+    const counts = countsByType && typeof countsByType === 'object' ? countsByType : {};
+    const out = [];
+    for (const label of Object.keys(counts)) {
+      if (Number(counts[label]) >= cap) {
+        out.push(`${label} hit the ${cap}-log limit — results may be incomplete; narrow the window or rescan later.`);
+      }
+    }
+    return out;
+  }
+
   function scanCutoffUnix(scanBackTo) {
     const t = Date.parse(scanBackTo || '');
     return Number.isFinite(t) ? Math.floor(t / 1000) : null;
@@ -5971,10 +5995,12 @@
       const classified = [];
       const failedLogs = [];
       const rawSamples = [];   // TEMP: first raw entry per log type, into the debug window
+      const pageCounts = {};   // #17 — label -> raw entry count, for the page-full warning
       for (const type of types) {
         try {
           const log = await fetchLogType(type, key, cutoffUnix);
           const pairs = logPairs(log);
+          pageCounts[scanLogTypeLabel(type)] = pairs.length;
           if (pairs.length) {
             rawSamples.push(`RAW ${scanLogTypeLabel(type)} (${type}): ${scanDebugTrunc(scanDebugStringify(pairs[0][1]))}`);
           }
@@ -6097,7 +6123,11 @@
         });
       }
 
+      // #17 — non-blocking warning when a log-type page came back full (may be
+      // truncated; this slice does not paginate).
+      const pageWarnings = pageFullWarnings(pageCounts, SCAN_LOG_LIMIT);
       const staged = { ...preview, buys: [],
+        warnings: pageWarnings,
         ignored: [...(preview.ignored || []), ...rarityDropped] };
       staged.summary = { ...(preview.summary || {}),
         ignored: ((preview.summary && preview.summary.ignored) || 0) + rarityDropped.length };
@@ -10870,6 +10900,7 @@
     applyItemDetails,
     scanLogTypeLabel,
     scanLogFailureSummary,
+    pageFullWarnings,
     SellParser,
     matchSell,
     summarizeSells,
