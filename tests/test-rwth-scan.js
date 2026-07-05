@@ -545,3 +545,62 @@ test('dismissedKeySet flattens all eventKeys and buildDismissedUi renders restor
   assert.strictEqual(P.buildDismissedUi([], false), '');
   assert.doesNotMatch(P.buildDismissedUi(list, true), /scan-restore/);
 });
+
+// ─── S4 (#16) — Refresh window selection + "last scanned X ago" status ───────
+
+test('resolveScanCutoffUnix uses lastScan (since-last-scan) when present', () => {
+  const lastScan = Date.UTC(2026, 5, 20, 12, 0, 0);   // epoch ms
+  // lastScan wins over a manual back-to date; result is unix seconds.
+  assert.strictEqual(
+    P.resolveScanCutoffUnix(lastScan, '2026-01-01'),
+    Math.floor(lastScan / 1000),
+  );
+});
+
+test('resolveScanCutoffUnix falls back to scanBackTo on first run (no lastScan)', () => {
+  const expected = P.scanCutoffUnix('2026-01-01');
+  assert.strictEqual(P.resolveScanCutoffUnix(0, '2026-01-01'), expected);
+  assert.strictEqual(P.resolveScanCutoffUnix(null, '2026-01-01'), expected);
+  // A non-finite/absent lastScan still falls through to the manual override.
+  assert.strictEqual(P.resolveScanCutoffUnix(undefined, '2026-01-01'), expected);
+});
+
+test('resolveScanCutoffUnix yields null when neither lastScan nor scanBackTo is set', () => {
+  assert.strictEqual(P.resolveScanCutoffUnix(0, ''), null);
+  assert.strictEqual(P.resolveScanCutoffUnix(0, 'not-a-date'), null);
+});
+
+test('formatLastScanned reports "Never scanned" before the first scan', () => {
+  assert.strictEqual(P.formatLastScanned(0, Date.now()), 'Never scanned');
+  assert.strictEqual(P.formatLastScanned(null, Date.now()), 'Never scanned');
+  assert.strictEqual(P.formatLastScanned(undefined, Date.now()), 'Never scanned');
+});
+
+test('formatLastScanned humanizes the gap in minutes / hours / days', () => {
+  const now = Date.UTC(2026, 6, 1, 12, 0, 0);
+  const min = 60 * 1000, hour = 60 * min, day = 24 * hour;
+  assert.strictEqual(P.formatLastScanned(now - 30 * 1000, now), 'Last scanned just now');
+  assert.strictEqual(P.formatLastScanned(now - 1 * min, now), 'Last scanned 1 minute ago');
+  assert.strictEqual(P.formatLastScanned(now - 5 * min, now), 'Last scanned 5 minutes ago');
+  assert.strictEqual(P.formatLastScanned(now - 1 * hour, now), 'Last scanned 1 hour ago');
+  assert.strictEqual(P.formatLastScanned(now - 3 * hour, now), 'Last scanned 3 hours ago');
+  assert.strictEqual(P.formatLastScanned(now - 1 * day, now), 'Last scanned 1 day ago');
+  assert.strictEqual(P.formatLastScanned(now - 4 * day, now), 'Last scanned 4 days ago');
+  // A future/skewed stamp never renders a negative age.
+  assert.strictEqual(P.formatLastScanned(now + 5 * min, now), 'Last scanned just now');
+});
+
+test('buildLedgerTab renders a one-click Refresh button and a last-scanned status line', () => {
+  const html = P.buildLedgerTab({ ledger: { items: [], statusFilter: 'all', lastScan: 0 } });
+  assert.match(html, /data-action="refresh"/);
+  assert.match(html, /⟳ Refresh/);
+  assert.match(html, /class="rwth-scan-status"/);
+  assert.match(html, /Never scanned/);
+});
+
+test('buildLedgerTab status line reflects a prior scan', () => {
+  const html = P.buildLedgerTab({
+    ledger: { items: [], statusFilter: 'all', lastScan: Date.now() - 2 * 60 * 1000 },
+  });
+  assert.match(html, /Last scanned 2 minutes ago/);
+});

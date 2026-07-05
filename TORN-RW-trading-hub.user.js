@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.170
+// @version      0.3.171
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.170';
+  const SCRIPT_VERSION = '0.3.171';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -589,6 +589,18 @@
     if (scanPreview && typeof scanPreview === 'object') MEM.ledger.scanPreview = scanPreview;
     const scanDebugSummary = Store.get(SCAN_DEBUG_SUMMARY_STORE);
     if (Array.isArray(scanDebugSummary)) MEM.ledger.scanDebugSummary = scanDebugSummary;
+
+    // #16 — restore the last-scan stamp (epoch ms) so the since-last-scan window
+    // survives reloads. One-time migration: installs upgrading from before this
+    // store carry no key, so seed 0 (treated as "never scanned" — first Refresh
+    // falls back to scanBackTo / the full default window).
+    const lastScan = Store.get('rwth_last_scan');
+    if (lastScan == null) {
+      Store.set('rwth_last_scan', 0);
+      MEM.ledger.lastScan = 0;
+    } else if (Number.isFinite(Number(lastScan))) {
+      MEM.ledger.lastScan = Number(lastScan);
+    }
 
     const transactions = Store.get('rwth_transactions');
     if (Array.isArray(transactions)) MEM.advertise.transactions = transactions;
@@ -1710,6 +1722,27 @@
     const a = Number(from), b = Number(to);
     if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
     return Math.round((b - a) / DAY_MS);
+  }
+
+  // #16 — pure "last scanned X ago" status text (ADR-0002). lastScan is epoch ms
+  // of the last completed scan; `now` is wall-clock epoch ms passed in by the
+  // caller so the helper stays pure and testable. Returns 'Never scanned' before
+  // the first scan (lastScan absent / 0 / non-finite) and clamps a future/zero
+  // gap to 'just now' so a clock skew never renders a negative age. Exposed via
+  // __RwthPure for the Node test seam.
+  function formatLastScanned(lastScan, now) {
+    const last = Number(lastScan);
+    if (!Number.isFinite(last) || last <= 0) return 'Never scanned';
+    const n = Number(now);
+    const diff = Number.isFinite(n) ? n - last : NaN;
+    if (!Number.isFinite(diff) || diff < 60 * 1000) return 'Last scanned just now';
+    const mins = Math.floor(diff / (60 * 1000));
+    const unit = (n2, label) => `${n2} ${label}${n2 === 1 ? '' : 's'}`;
+    let text;
+    if (mins < 60) text = unit(mins, 'minute');
+    else if (mins < 60 * 24) text = unit(Math.floor(mins / 60), 'hour');
+    else text = unit(Math.floor(mins / (60 * 24)), 'day');
+    return `Last scanned ${text} ago`;
   }
 
   // Pure per-row projection — the figures a ledger row renders, with every leg
@@ -3131,11 +3164,14 @@
         </div>
         <div class="rwth-ledger-actions">
           ${sortSel}
+          <button class="rwth-btn" type="button" data-action="refresh"${
+            scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : '⟳ Refresh'}</button>
           <button class="rwth-btn rwth-btn-ghost" type="button" data-action="scan"${
             scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : 'Scan logs'}</button>
           <button class="rwth-btn rwth-btn-add" type="button" data-action="add-item">+ add</button>
         </div>
       </div>
+      <div class="rwth-scan-status">${escapeAttr(formatLastScanned(L.lastScan, now))}</div>
       ${err ? `<div class="rwth-form-error rwth-banner">${escapeAttr(err)}</div>` : ''}
       ${L.scanMessage && !err ? `<div class="rwth-placeholder">${escapeAttr(L.scanMessage)}</div>` : ''}
       ${buildScanChecklist(mem)}
@@ -4671,6 +4707,7 @@
         case 'cancel-item':   setState({ ledger: { ...MEM.ledger, editingId: null } }); break;
         case 'save-item':     saveLedgerItem(); break;
         case 'scan':          setState({ ledger: { ...MEM.ledger, scanSetupOpen: true } }); break;
+        case 'refresh':       LogScanner.scan(); break;
         case 'run-scan':      LogScanner.scan(); break;
         case 'close-scan-setup': setState({ ledger: { ...MEM.ledger, scanSetupOpen: false } }); break;
         case 'confirm-scan':  confirmScan(); break;
@@ -5824,6 +5861,18 @@
     return Number.isFinite(t) ? Math.floor(t / 1000) : null;
   }
 
+  // #16 — pure cutoff selector (ADR-0002): resolves the scan window's lower bound
+  // as a unix-seconds cutoff. Since-last-scan is the default — a completed scan's
+  // lastScan (epoch ms) becomes the next scan's floor, so Refresh only pulls new
+  // events. First run / no lastScan falls back to the manual "scan back to" date,
+  // and absent that, null (the full default window, bounded only by
+  // SCAN_LOG_LIMIT). Exposed via __RwthPure for the Node test seam.
+  function resolveScanCutoffUnix(lastScan, scanBackTo) {
+    const last = Number(lastScan);
+    if (Number.isFinite(last) && last > 0) return Math.floor(last / 1000);
+    return scanCutoffUnix(scanBackTo);
+  }
+
   async function fetchLogType(logType, key, cutoffUnix) {
     // Transport + envelope unwrap live in the client now (#6); the `_`
     // cache-buster and the `from` cutoff are preserved by Torn.userLog.
@@ -5899,7 +5948,9 @@
       for (const oldKey of (Store.get('rwth_seen_wins') || [])) {
         seen.add(scanEventKey(SCAN_LOG_TYPES.auctionBuy, oldKey));
       }
-      const cutoffUnix = scanCutoffUnix(MEM.settings.scanBackTo);
+      // #16 — default the window to "since the last scan"; only fall back to the
+      // manual scan-back-to date on the first run (no lastScan yet).
+      const cutoffUnix = resolveScanCutoffUnix(MEM.ledger.lastScan, MEM.settings.scanBackTo);
       const types = selectedScanLogTypes(MEM.settings.scanSources);
       if (!types.length) {
         setState({ fetchError: 'Select at least one scan source before scanning.',
@@ -5909,6 +5960,7 @@
       scanDebug('scan start', {
         version: SCRIPT_VERSION,
         scanBackTo: MEM.settings.scanBackTo || '',
+        lastScan: MEM.ledger.lastScan || 0,
         cutoffUnix,
         selectedTypes: types,
         itemNameCount: Object.keys(itemNames || {}).length,
@@ -6061,14 +6113,17 @@
         stagedReview: staged.review,
         stagedIgnored: staged.ignored,
       });
+      // #16 — persist lastScan so the since-last-scan window survives a reload.
+      const scanCompletedAt = Date.now();
       Store.set('rwth_scan', keptBuys);
       Store.set('rwth_scan_preview', staged);
       Store.set(SCAN_DEBUG_SUMMARY_STORE, scanDebugSummary);
+      Store.set('rwth_last_scan', scanCompletedAt);
       setState({
         fetchError: null,
         ledger: {
           ...MEM.ledger, scanning: false, scanSetupOpen: false,
-          scanResults: keptBuys, scanPreview: staged, scanDebugSummary, lastScan: Date.now(),
+          scanResults: keptBuys, scanPreview: staged, scanDebugSummary, lastScan: scanCompletedAt,
           scanMessage: failedLogs.length
             ? `Scan finished with skipped logs: ${scanLogFailureSummary(failedLogs)}`
             : (keptBuys.length || preview.sales.length || preview.mugs.length || preview.review.length || staged.ignored.length || preview.already.length)
@@ -6822,6 +6877,7 @@
       .rwth-scan-meta { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); }
       .rwth-scan-note { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); }
       .rwth-scan-note strong { color: var(--rwth-secondary); }
+      .rwth-scan-status { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); padding: 2px 2px 0; }
       .rwth-scan-debug {
         display: flex; flex-direction: column; gap: 4px;
         border: 1px solid var(--rwth-border-soft); border-radius: 4px;
@@ -10864,6 +10920,9 @@
     normalizeItems,
     ItemDict,
     selectedScanLogTypes,
+    scanCutoffUnix,
+    resolveScanCutoffUnix,
+    formatLastScanned,
     mergeLadder,
     hasRealApiKey,
     hydrate,
