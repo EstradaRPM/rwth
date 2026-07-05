@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.172
+// @version      0.3.173
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.172';
+  const SCRIPT_VERSION = '0.3.173';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1088,6 +1088,22 @@
         timestamp: hit.buyTimestamp != null && Number.isFinite(Number(hit.buyTimestamp)) ? Number(hit.buyTimestamp) : null,
       });
     }
+    // #18 — unchecked sales route through the same recoverable dismissal path as
+    // buys/mugs. A sale defaults checked (import); unchecking it snapshots the sell
+    // so the row is suppressed yet restorable, exactly like a dismissed buy.
+    for (const row of ((preview && preview.sales) || [])) {
+      if (!row || row.checked !== false) continue;
+      const eventKeys = (row.eventKeys || []).filter(Boolean).map(String);
+      if (!eventKeys.length) continue;
+      const sell = row.sell || {};
+      out.push({
+        eventKeys,
+        type: 'sale',
+        itemName: sell.itemName || null,
+        amount: sell.saleNet != null && Number.isFinite(Number(sell.saleNet)) ? Number(sell.saleNet) : null,
+        timestamp: sell.timestamp != null && Number.isFinite(Number(sell.timestamp)) ? Number(sell.timestamp) : null,
+      });
+    }
     for (const row of ((preview && preview.mugs) || [])) {
       if (!row || row.checked !== false) continue;
       const eventKeys = (row.eventKeys || []).filter(Boolean).map(String);
@@ -1102,6 +1118,18 @@
       });
     }
     return out;
+  }
+
+  // #18 — pure commit-selection for scan sales (ADR-0002). A sale imports when its
+  // checkbox is left checked (the default, preserving today's "import all sales"
+  // behavior); unchecking routes it to the dismissal store instead. Exported on
+  // __RwthPure so the commit selection is testable without the impure confirmScan.
+  function selectScanSales(preview) {
+    const sales = (preview && preview.sales) || [];
+    return {
+      imported: sales.filter(r => r && r.checked !== false),
+      dismissed: sales.filter(r => r && r.checked === false),
+    };
   }
 
   // Merge new dismissals onto the existing list, deduping by any shared eventKey.
@@ -2297,17 +2325,26 @@
     </div>`;
   }
 
+  // #18 — every row the commit would write is visible and opt-out-able. Sales and
+  // review rows carry a checkbox wired through syncScanPreviewEdit exactly like
+  // mugs (render key ↔ handler key match). No ×5/×4/×3 caps: long lists scroll in
+  // a bounded container. Sales default checked (preserving "import all sales");
+  // review rows default unchecked (today's "skipped").
   function buildScanPreviewUi(preview, buyCount) {
     const s = preview.summary || {};
     const chip = (label, n) => `<span class="rwth-scan-chip">${label}: ${Number(n) || 0}</span>`;
-    const sales = (preview.sales || []).slice(0, 5).map(r => {
+    const scroll = (body) => `<div class="rwth-scan-scroll">${body}</div>`;
+    const sales = (preview.sales || []).map((r, idx) => {
       const sell = r.sell || {};
+      const key = escapeAttr((r.eventKeys || []).join('|') || `sale-${idx}`);
+      const checked = r.checked === false ? '' : ' checked';
       const dest = r.duplicate ? 'already logged' : r.matchedId ? 'matched' : 'recent';
-      return `<div class="rwth-scan-line">
+      return `<label class="rwth-scan-line rwth-scan-check-line" data-scan-sale="${key}">
+        <input type="checkbox" data-scan-sale-check${checked}>
         <span>${escapeAttr(sell.itemName) || 'Unparsed sale'}</span>
         <span>${fmtMoney(sell.saleNet)}</span>
         <span>${escapeAttr(dest)}</span>
-      </div>`;
+      </label>`;
     }).join('');
     const mugs = (preview.mugs || []).map((r, idx) => {
       const mug = r.mug || {};
@@ -2322,9 +2359,18 @@
         <span>${escapeAttr(dest)}</span>
       </label>`;
     }).join('');
-    const review = (preview.review || []).slice(0, 4).map(r =>
-      `<div class="rwth-scan-line"><span>${escapeAttr(r.reason || r.type || 'Needs review')}</span><span></span><span>skipped</span></div>`).join('');
-    const ignored = (preview.ignored || []).slice(0, 3).map(r =>
+    const review = (preview.review || []).map((r, idx) => {
+      const key = escapeAttr((r.eventKeys || []).join('|') || `review-${idx}`);
+      const checked = r.checked === true ? ' checked' : '';
+      const dest = r.checked === true ? 'import' : 'skipped';
+      return `<label class="rwth-scan-line rwth-scan-check-line" data-scan-review="${key}">
+        <input type="checkbox" data-scan-review-check${checked}>
+        <span>${escapeAttr(r.reason || r.type || 'Needs review')}</span>
+        <span></span>
+        <span>${escapeAttr(dest)}</span>
+      </label>`;
+    }).join('');
+    const ignored = (preview.ignored || []).map(r =>
       `<div class="rwth-scan-line"><span>${escapeAttr(r.itemName || r.reason || 'Ignored')}</span><span></span><span>ignored</span></div>`).join('');
     // #17 — non-blocking page-full warnings surfaced above the preview lists.
     const warnings = (preview.warnings || []).map(w =>
@@ -2336,10 +2382,10 @@
         ${chip('buys', buyCount || s.buys)}${chip('sales', s.sales)}${chip('mugs', s.mugs)}
         ${chip('review', s.review)}${chip('ignored', s.ignored)}${chip('already', s.already)}
       </div>
-      ${sales ? `<div class="rwth-scan-section"><div class="rwth-field-label">Sales</div>${sales}</div>` : ''}
-      ${mugs ? `<div class="rwth-scan-section"><div class="rwth-field-label">Mugs</div>${mugs}</div>` : ''}
-      ${review ? `<div class="rwth-scan-section"><div class="rwth-field-label">Needs review</div>${review}</div>` : ''}
-      ${ignored ? `<div class="rwth-scan-section"><div class="rwth-field-label">Ignored</div>${ignored}</div>` : ''}
+      ${sales ? `<div class="rwth-scan-section"><div class="rwth-field-label">Sales</div>${scroll(sales)}</div>` : ''}
+      ${mugs ? `<div class="rwth-scan-section"><div class="rwth-field-label">Mugs</div>${scroll(mugs)}</div>` : ''}
+      ${review ? `<div class="rwth-scan-section"><div class="rwth-field-label">Needs review</div>${scroll(review)}</div>` : ''}
+      ${ignored ? `<div class="rwth-scan-section"><div class="rwth-field-label">Ignored</div>${scroll(ignored)}</div>` : ''}
     </div>`;
   }
 
@@ -4978,16 +5024,28 @@
     Store.set('rwth_scan', MEM.ledger.scanResults);
   }
 
+  // #18 — one handler for every preview checkbox. Mugs, sales, and review rows all
+  // share the render key ↔ handler key contract: the row's data-scan-<kind>
+  // carries eventKeys.join('|') || `<kind>-<idx>`, and this recomputes the same key
+  // to find and flip the matching row's `checked`. Sales default checked (undefined
+  // ⇒ import), review rows default unchecked.
   function syncScanPreviewEdit(e) {
     const el = e.target;
-    if (!el || !el.matches || !el.matches('[data-scan-mug-check]')) return;
-    const row = el.closest('[data-scan-mug]');
+    if (!el || !el.matches) return;
+    const kinds = [
+      { check: '[data-scan-mug-check]', row: '[data-scan-mug]', ds: 'scanMug', field: 'mugs', prefix: 'mug' },
+      { check: '[data-scan-sale-check]', row: '[data-scan-sale]', ds: 'scanSale', field: 'sales', prefix: 'sale' },
+      { check: '[data-scan-review-check]', row: '[data-scan-review]', ds: 'scanReview', field: 'review', prefix: 'review' },
+    ];
+    const kind = kinds.find(k => el.matches(k.check));
+    if (!kind) return;
+    const row = el.closest(kind.row);
     const preview = MEM.ledger.scanPreview;
-    if (!row || !preview || !Array.isArray(preview.mugs)) return;
-    const key = row.dataset.scanMug;
-    preview.mugs = preview.mugs.map((m, idx) => {
-      const mugKey = (m.eventKeys || []).join('|') || `mug-${idx}`;
-      return mugKey === key ? { ...m, checked: el.checked } : m;
+    if (!row || !preview || !Array.isArray(preview[kind.field])) return;
+    const key = row.dataset[kind.ds];
+    preview[kind.field] = preview[kind.field].map((r, idx) => {
+      const rowKey = (r.eventKeys || []).join('|') || `${kind.prefix}-${idx}`;
+      return rowKey === key ? { ...r, checked: el.checked } : r;
     });
     Store.set('rwth_scan_preview', preview);
   }
@@ -6204,7 +6262,9 @@
     const newTx = [];
     const newMugs = [];
     if (preview) {
-      for (const row of (preview.sales || [])) {
+      // #18 — import only checked sales; unchecked ones are dismissed below via
+      // collectDismissals (same recoverable path as unchecked buys/mugs).
+      for (const row of selectScanSales(preview).imported) {
         const sell = row.sell || {};
         const matchedId = stagedBuyIds[row.matchedId] || row.matchedId;
         if (matchedId) {
@@ -6881,9 +6941,21 @@
         align-items: center; font: 11px var(--rwth-font-mono); color: var(--rwth-muted);
         border-top: 1px solid var(--rwth-border-soft); padding-top: 5px;
       }
-      .rwth-scan-line.rwth-scan-mug-line {
+      .rwth-scan-line.rwth-scan-mug-line,
+      .rwth-scan-line.rwth-scan-check-line {
         grid-template-columns: auto minmax(0, 1fr) auto auto;
         cursor: pointer;
+      }
+      .rwth-scan-check-line span:nth-of-type(1) {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        color: var(--rwth-text);
+      }
+      .rwth-scan-check-line input { accent-color: var(--rwth-accent); }
+      /* #18 — uncapped preview lists scroll inside a bounded box so a long scan
+         never pushes the Commit button off-screen. */
+      .rwth-scan-scroll {
+        display: flex; flex-direction: column; gap: var(--rwth-gap-sm);
+        max-height: 220px; overflow-y: auto;
       }
       .rwth-scan-line span:first-child {
         min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -10890,11 +10962,13 @@
     tradeUser,
     scanHitIsRwTradeable,
     buildScanPreview,
+    buildScanPreviewUi,
     buildScanSetup,
     buildDismissedUi,
     normalizeDismissedList,
     dismissedKeySet,
     collectDismissals,
+    selectScanSales,
     mergeDismissals,
     restoreDismissals,
     applyItemDetails,

@@ -546,6 +546,97 @@ test('dismissedKeySet flattens all eventKeys and buildDismissedUi renders restor
   assert.doesNotMatch(P.buildDismissedUi(list, true), /scan-restore/);
 });
 
+// ─── S3 (#18) — sales/review checkboxes + uncapped lists + commit honors them ─
+
+// Six RW sales in one preview, so we can prove the ×5 cap is gone.
+function sixSalePreview() {
+  const rows = [];
+  for (let i = 0; i < 6; i++) {
+    rows.push(P.classifyLogEvent({
+      id: `sale-cap-${i}`,
+      timestamp: 1779372185 + i,
+      data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 90_000_000 + i, buyer: 'BuyerName' },
+    }, P.SCAN_LOG_TYPES.itemMarketSale, `sale-cap-${i}`, {}, cats));
+  }
+  return P.buildScanPreview(rows, { cats, items: [], transactions: [] });
+}
+
+test('buildScanPreviewUi renders every sale (no ×5 cap) with a default-checked checkbox', () => {
+  const preview = sixSalePreview();
+  assert.strictEqual(preview.sales.length, 6);
+  const ui = P.buildScanPreviewUi(preview, 0);
+  // The 6th sale row renders — the old slice(0,5) would have dropped it.
+  const saleRows = (ui.match(/data-scan-sale=/g) || []).length;
+  assert.strictEqual(saleRows, 6);
+  // Sales default checked (preserves today's import-all behavior).
+  assert.match(ui, /data-scan-sale-check checked/);
+  // Long lists scroll inside a bounded container.
+  assert.match(ui, /rwth-scan-scroll/);
+});
+
+test('buildScanPreviewUi renders review rows with a default-unchecked checkbox', () => {
+  const review = [{ type: 'review', reason: 'bundled or ambiguous trade', eventKeys: ['4440:r1'] }];
+  const ui = P.buildScanPreviewUi({ sales: [], mugs: [], review, ignored: [], summary: {} }, 0);
+  assert.match(ui, /data-scan-review="4440:r1"/);
+  // Review defaults unchecked (today's "skipped"): no `checked` on the input.
+  assert.doesNotMatch(ui, /data-scan-review-check checked/);
+  assert.match(ui, /skipped/);
+});
+
+test('an unchecked sale is not imported and is snapshotted into the dismissal store', () => {
+  const preview = P.buildScanPreview([
+    P.classifyLogEvent({
+      id: 'sale-uncheck',
+      timestamp: 1779372185,
+      data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 90_000_000, buyer: 'BuyerName' },
+    }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-uncheck', {}, cats),
+  ], { cats, items: [], transactions: [] });
+  assert.strictEqual(preview.sales.length, 1);
+
+  // User unchecks the sale in the preview (syncScanPreviewEdit sets checked:false).
+  const unchecked = { ...preview, sales: preview.sales.map(r => ({ ...r, checked: false })) };
+
+  // selectScanSales — the pure commit selection — drops it from the import set.
+  const sel = P.selectScanSales(unchecked);
+  assert.strictEqual(sel.imported.length, 0);
+  assert.strictEqual(sel.dismissed.length, 1);
+
+  // …and collectDismissals snapshots it as a restorable sale entry (S1 path).
+  const dismissals = P.collectDismissals([], unchecked);
+  assert.strictEqual(dismissals.length, 1);
+  assert.strictEqual(dismissals[0].type, 'sale');
+  assert.strictEqual(dismissals[0].itemName, 'Diamond Bladed Knife');
+  assert.strictEqual(dismissals[0].amount, 90_000_000);
+  assert.ok(dismissals[0].eventKeys.includes('1113:sale-uncheck'));
+
+  // A dismissed sale gates like "already seen" on the next scan.
+  const preview2 = P.buildScanPreview([
+    P.classifyLogEvent({
+      id: 'sale-uncheck',
+      timestamp: 1779372185,
+      data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 90_000_000, buyer: 'BuyerName' },
+    }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-uncheck', {}, cats),
+  ], { cats, items: [], transactions: [], dismissed: dismissals });
+  assert.strictEqual(preview2.sales.length, 0);
+  assert.strictEqual(preview2.already.length, 1);
+});
+
+test('selectScanSales imports checked sales and leaves default (undefined) sales checked', () => {
+  const preview = {
+    sales: [
+      { sell: { itemName: 'A' }, eventKeys: ['1113:a'] },                 // default → import
+      { sell: { itemName: 'B' }, eventKeys: ['1113:b'], checked: true },  // checked → import
+      { sell: { itemName: 'C' }, eventKeys: ['1113:c'], checked: false }, // unchecked → dismiss
+    ],
+  };
+  const sel = P.selectScanSales(preview);
+  assert.deepStrictEqual(sel.imported.map(r => r.sell.itemName), ['A', 'B']);
+  assert.deepStrictEqual(sel.dismissed.map(r => r.sell.itemName), ['C']);
+  // Empty / missing preview is safe.
+  assert.deepStrictEqual(P.selectScanSales({}).imported, []);
+  assert.deepStrictEqual(P.selectScanSales(null).dismissed, []);
+});
+
 // ─── S4 (#16) — Refresh window selection + "last scanned X ago" status ───────
 
 test('resolveScanCutoffUnix uses lastScan (since-last-scan) when present', () => {
