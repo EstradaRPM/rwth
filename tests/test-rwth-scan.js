@@ -764,3 +764,128 @@ test('buildScanChecklist renders page-full warnings non-blockingly in the previe
   // Non-blocking: the Commit import action still renders alongside the warning.
   assert.match(html, /data-action="confirm-scan"/);
 });
+
+// ─── S7 (#20) — residual confirmScan contract: mug/seen invariant, legacy
+// seen-wins conversion, transaction dedupe on commit ─────────────────────────
+// These pin the parts of confirmScan's contract that S1–S6 leave implicit. The
+// commit itself (confirmScan) is impure and unexported; each test exercises the
+// pure precursor confirmScan consumes, so a future refactor can't silently drop
+// the invariant.
+
+test('mugs are excluded from the seen-set gate while buys are not (backfill invariant)', () => {
+  // The SAME eventKey sits in the global seen-set for both a buy and a mug. The
+  // buy must gate out ("already imported"); the mug must still stage — mugs
+  // deliberately re-fetch so a dropped mug can backfill. confirmScan mirrors this
+  // by keeping mug keys OUT of rwth_seen_log_events (only $0-mug suppress keys and
+  // committed buy/sale keys land there); this asserts the preview-side half.
+  const buy = P.classifyLogEvent({
+    id: 'buy-seen',
+    timestamp: 1779280000,
+    data: { item: { id: 614, uid: 501, name: 'Diamond Bladed Knife' }, final_price: 75_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-seen', {}, {});
+  const mug = P.classifyLogEvent({
+    id: 'mug-seen',
+    timestamp: 1779280500,
+    data: { cash: 6_000_000, attacker: 'Mugger' },
+  }, P.SCAN_LOG_TYPES.mugged, 'mug-seen', {}, {});
+
+  const buyKey = P.scanEventKey(P.SCAN_LOG_TYPES.auctionBuy, 'buy-seen');
+  const mugKey = P.scanEventKey(P.SCAN_LOG_TYPES.mugged, 'mug-seen');
+
+  const preview = P.buildScanPreview([buy, mug], {
+    cats: {}, items: [], transactions: [],
+    // Both keys are in the seen-set; NEITHER is in the mug store.
+    seen: [buyKey, mugKey],
+  });
+
+  // The buy is gated by the seen-set…
+  assert.strictEqual(preview.buys.length, 0);
+  assert.ok(preview.already.some(r => (r.eventKeys || []).includes(buyKey)));
+  // …but the mug ignores the seen-set and re-stages so it can backfill, carrying
+  // the eventKeys that confirmScan writes into rwth_mugs when the row is checked.
+  assert.strictEqual(preview.mugs.length, 1);
+  assert.strictEqual(preview.mugs[0].mug.amount, 6_000_000);
+  assert.strictEqual(preview.mugs[0].checked, true);
+  assert.deepStrictEqual(preview.mugs[0].eventKeys, [mugKey]);
+  // The mug is NOT parked in `already` — only the buy was gated.
+  assert.strictEqual(preview.already.some(r => (r.eventKeys || []).includes(mugKey)), false);
+});
+
+test('legacy rwth_seen_wins ids convert to auction-buy eventKeys and gate the re-seen win', () => {
+  // The scan loop upgrades each bare id in the legacy rwth_seen_wins store to a
+  // full eventKey via scanEventKey(auctionBuy, id) before gating, and confirmScan
+  // mirrors committed auction keys back into it. Pin that the converted key equals
+  // the auction buy's own key, so a win recorded under the old store stays
+  // suppressed after migration.
+  const buy = P.classifyLogEvent({
+    id: 'win-legacy',
+    timestamp: 1779280000,
+    data: { item: { id: 614, uid: 777, name: 'Diamond Bladed Knife' }, final_price: 75_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'win-legacy', {}, {});
+
+  const convertedKey = P.scanEventKey(P.SCAN_LOG_TYPES.auctionBuy, 'win-legacy');
+  assert.strictEqual(convertedKey, `${P.SCAN_LOG_TYPES.auctionBuy}:win-legacy`);
+  // The conversion must land on exactly the buy's own key, or the gate misses.
+  assert.strictEqual(buy.hit.eventKey, convertedKey);
+
+  // Fed as seen (what the scan loop does with the legacy store), the win is gated.
+  const preview = P.buildScanPreview([buy], {
+    cats: {}, items: [], transactions: [], seen: [convertedKey],
+  });
+  assert.strictEqual(preview.buys.length, 0);
+  assert.strictEqual(preview.already.length, 1);
+  assert.ok(preview.already[0].eventKeys.includes(convertedKey));
+
+  // Sanity: without the converted legacy key the same win DOES stage, proving the
+  // suppression above is the conversion at work, not an unrelated filter.
+  const fresh = P.buildScanPreview([buy], { cats: {}, items: [], transactions: [] });
+  assert.strictEqual(fresh.buys.length, 1);
+});
+
+test('a scan sale whose txKey already exists in Recent Transactions is flagged duplicate', () => {
+  // buildScanPreview flags a sale as duplicate when its txKey collides with an
+  // existing transaction; confirmScan honours it (`!row.duplicate && !seenTx.has`)
+  // so re-committing a sale already in Recent Transactions never double-writes.
+  const mkSale = () => P.classifyLogEvent({
+    id: 'sale-dupe',
+    timestamp: 1779372185,
+    data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], price: 100_000_000, net: 95_000_000, buyer: 'BuyerName' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-dupe', {}, cats);
+
+  // First scan: no prior transactions → not a duplicate.
+  const first = P.buildScanPreview([mkSale()], { cats, items: [], transactions: [] });
+  assert.strictEqual(first.sales.length, 1);
+  assert.strictEqual(first.sales[0].duplicate, false);
+  const sell = first.sales[0].sell;
+
+  // Model the row confirmScan would write (sellToTx: gross price wins over net).
+  const committedTx = {
+    itemName: sell.itemName,
+    bonusName: sell.bonusName,
+    buyer: sell.buyer,
+    price: sell.saleGross != null ? sell.saleGross : sell.saleNet,
+    timestamp: sell.timestamp,
+  };
+
+  // Rescan the same log entry with that transaction already present → duplicate,
+  // so the commit skips it and Recent Transactions is not written twice.
+  const second = P.buildScanPreview([mkSale()], { cats, items: [], transactions: [committedTx] });
+  assert.strictEqual(second.sales.length, 1);
+  assert.strictEqual(second.sales[0].duplicate, true);
+});
+
+test('two identical sales in one scan dedupe: the second is flagged duplicate', () => {
+  // Within a single scan pass, two distinct log entries with identical sale
+  // content share a txKey — the second is marked duplicate so the commit posts
+  // only one Recent Transactions row.
+  const mk = (id) => P.classifyLogEvent({
+    id, timestamp: 1779372185,
+    data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 90_000_000, buyer: 'BuyerName' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, id, {}, cats);
+
+  // Distinct entry ids (so both clear the seen gate) but identical sale content.
+  const preview = P.buildScanPreview([mk('sale-a'), mk('sale-b')], { cats, items: [], transactions: [] });
+  assert.strictEqual(preview.sales.length, 2);
+  assert.strictEqual(preview.sales[0].duplicate, false);
+  assert.strictEqual(preview.sales[1].duplicate, true);
+});
