@@ -395,6 +395,29 @@ test('buildScanPreview routes a non-RW variant sale to recent, not the held RW r
   assert.strictEqual(preview.sales[0].matchedId, null);
 });
 
+test('buildScanPreview ignores an unrelated bazaar sale that is not an RW item', () => {
+  // Selling something that isn't RW armor/weapon (drugs, plushies, junk) — its
+  // name is absent from the cats index, so it resolves to no category. With no
+  // matching open ledger row it must be IGNORED, never staged as income.
+  const sale = P.classifyLogEvent({
+    id: 'sale-junk',
+    timestamp: 1779372185,
+    action: 'You sold 100x Xanax on your bazaar to BuyerName at $850,000 each for a total of $85,000,000',
+    data: { item: [{ id: 206, name: 'Xanax' }], net: 85_000_000, buyer: 'BuyerName' },
+  }, P.SCAN_LOG_TYPES.bazaarSale, 'sale-junk', {}, cats);
+
+  const preview = P.buildScanPreview([sale], {
+    cats,
+    items: [{ id: 'held-rw', itemName: 'Riot Body', status: 'held', bonuses: [] }],
+    transactions: [],
+  });
+
+  assert.strictEqual(preview.sales.length, 0);
+  assert.strictEqual(preview.ignored.length, 1);
+  assert.strictEqual(preview.ignored[0].reason, 'non-RW sale');
+  assert.strictEqual(preview.ignored[0].itemName, 'Xanax');
+});
+
 // NOTE: removed "mug events attach only when one sold row is clearly nearby" —
 // mugs no longer attach to a nearby sold row. They are staged as standalone flat
 // cash (no matchedId); see the flat-cash mug tests in test-rwth.js.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.167
+// @version      0.3.168
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.167';
+  const SCRIPT_VERSION = '0.3.168';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1507,7 +1507,15 @@
         const cat = scanCategory(sell.itemName, cats);
         const matched = matchSell(sell, saleMatchItems);
         enrichSellBonus(sell, matched);
-        if (cat && !isRwCategory(cat) && !matched) {
+        // A sale is RW only when it PROVES it: its item resolves to an RW
+        // category (the cats index holds ONLY weapon/armor names, so anything
+        // else — a drug, a plushie, an unrelated bazaar dump — resolves to no
+        // category) or it closes an open RW ledger row. Matching is the escape
+        // hatch for a tracked RW item whose name isn't in the cats index yet.
+        // The old `cat && !isRwCategory(cat)` gate ignored only KNOWN non-RW
+        // names and let every unclassified (cat=null) sale import as income;
+        // unlike buys, a sale never runs itemdetails, so this is its only guard.
+        if (!isRwCategory(cat) && !matched) {
           preview.ignored.push({ type: 'ignored', reason: 'non-RW sale', eventKeys, itemName: sell.itemName });
         } else {
           const duplicate = txSeen.has(txKey(sell));
