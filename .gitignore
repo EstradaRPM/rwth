@@ -7,6 +7,5 @@ auction-db/secrets.local.json
 # Auction-DB poller log (written by the scheduled task)
 auction-db/poll.log
 
-# Claude / editor local state
-.claude/settings.local.json
-.claude/worktrees/
+# Claude / editor local state — all harness-local, never committed
+.claude/
