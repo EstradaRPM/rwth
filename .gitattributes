@@ -1,0 +1,3 @@
+# The API registry is generated with LF and byte-compared by tests/test-api-endpoints.js.
+# Pin it to LF so core.autocrlf=true checkouts don't rewrite it to CRLF and break the drift guard.
+docs/api-endpoints.md text eol=lf
