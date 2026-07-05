@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.168
+// @version      0.3.169
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.168';
+  const SCRIPT_VERSION = '0.3.169';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -437,6 +437,8 @@
         // (it used to be its own always-open section), so it starts open.
         advImagesAdv: true, advOutputs: false,
         saleLog: true, analytics: true,
+        // #14 — dismissed-scan-rows drawer folds by default (recovery is rare).
+        scanDismissed: true,
         // Ledger dashboard charts drawer (cards + hero + analytics) folds by
         // default so the spreadsheet rows sit above the fold; the compact
         // summary strip stays visible.
@@ -457,6 +459,7 @@
     ledger: {
       items: [],
       mugs: [],               // standalone mug-cash records: { amount, timestamp, attacker, eventKeys }
+      dismissed: [],          // #14 — recoverable unchecked scan rows: { eventKeys, type, itemName, amount, timestamp }
       statusFilter: 'listed',
       editingId: null,        // null | 'new' | itemId — drives the add/edit form
       expandedId: null,       // null | itemId — the tap-expanded row
@@ -566,6 +569,18 @@
 
     const mugs = Store.get('rwth_mugs');
     if (Array.isArray(mugs)) MEM.ledger.mugs = mugs;
+
+    // #14 — the recoverable dismissal store. Unchecked scan rows land here (not
+    // the seen-set) so they stay suppressed yet restorable. One-time migration:
+    // installs upgrading from before the store carry no key, so seed an empty
+    // list once; existing lists are loaded (and normalized) as-is.
+    const dismissed = Store.get('rwth_dismissed');
+    if (dismissed == null) {
+      Store.set('rwth_dismissed', []);
+      MEM.ledger.dismissed = [];
+    } else {
+      MEM.ledger.dismissed = normalizeDismissedList(dismissed);
+    }
 
     // Pending scan checklist — survives panel close/reopen and page reload.
     const scan = Store.get('rwth_scan');
@@ -1007,6 +1022,93 @@
       if (!out[m[1]].includes(m[2])) out[m[1]].push(m[2]);
     }
     return out;
+  }
+
+  // ─── Dismissal store (rwth_dismissed) — recoverable unchecked scan rows ──────
+  // #14. Unchecking a buy or mug in the scan preview and committing records the
+  // row's eventKeys here instead of the seen-set. Dismissed keys gate scan
+  // staging exactly like seen (buildScanPreview), so the row never re-shows — but
+  // a per-row Restore drops the entry, so it returns on the next scan (fixes
+  // B1 permanently-lost buys and B2 zombie mugs). Each entry snapshots just
+  // enough to render a restore label:
+  //   { eventKeys:string[], type:'buy'|'sale'|'mug', itemName:string|null,
+  //     amount:number|null, timestamp:number|null }
+
+  function normalizeDismissedList(raw) {
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const d of raw) {
+      if (!d || !Array.isArray(d.eventKeys)) continue;
+      const eventKeys = d.eventKeys.map(String).filter(Boolean);
+      if (!eventKeys.length) continue;
+      out.push({
+        eventKeys,
+        type: d.type || null,
+        itemName: d.itemName != null ? d.itemName : null,
+        amount: d.amount != null && Number.isFinite(Number(d.amount)) ? Number(d.amount) : null,
+        timestamp: d.timestamp != null && Number.isFinite(Number(d.timestamp)) ? Number(d.timestamp) : null,
+      });
+    }
+    return out;
+  }
+
+  function dismissedKeySet(dismissed) {
+    const out = new Set();
+    for (const d of (Array.isArray(dismissed) ? dismissed : [])) {
+      for (const k of (d && d.eventKeys) || []) if (k) out.add(String(k));
+    }
+    return out;
+  }
+
+  // Snapshot the scan rows the user unchecked (buys from scanResults, mugs from
+  // the preview) into dismissal entries. Pure: results/preview in, entries out.
+  function collectDismissals(results, preview) {
+    const out = [];
+    for (const hit of (results || [])) {
+      if (!hit || hit.checked !== false) continue;
+      const eventKeys = (hit.eventKeys || [hit.eventKey || hit.key]).filter(Boolean).map(String);
+      if (!eventKeys.length) continue;
+      out.push({
+        eventKeys,
+        type: 'buy',
+        itemName: hit.itemName || null,
+        amount: hit.buyPrice != null && Number.isFinite(Number(hit.buyPrice)) ? Number(hit.buyPrice) : null,
+        timestamp: hit.buyTimestamp != null && Number.isFinite(Number(hit.buyTimestamp)) ? Number(hit.buyTimestamp) : null,
+      });
+    }
+    for (const row of ((preview && preview.mugs) || [])) {
+      if (!row || row.checked !== false) continue;
+      const eventKeys = (row.eventKeys || []).filter(Boolean).map(String);
+      if (!eventKeys.length) continue;
+      const mug = row.mug || {};
+      out.push({
+        eventKeys,
+        type: 'mug',
+        itemName: 'Mug',
+        amount: mug.amount != null && Number.isFinite(Number(mug.amount)) ? Number(mug.amount) : null,
+        timestamp: mug.timestamp != null && Number.isFinite(Number(mug.timestamp)) ? Number(mug.timestamp) : null,
+      });
+    }
+    return out;
+  }
+
+  // Merge new dismissals onto the existing list, deduping by any shared eventKey.
+  function mergeDismissals(existing, additions) {
+    const list = normalizeDismissedList(existing);
+    const have = dismissedKeySet(list);
+    for (const d of normalizeDismissedList(additions)) {
+      if (d.eventKeys.some(k => have.has(k))) continue;
+      for (const k of d.eventKeys) have.add(k);
+      list.push(d);
+    }
+    return list;
+  }
+
+  // Restore drops every entry that shares a key with the given set, so the
+  // matching row is no longer suppressed and reappears on the next scan.
+  function restoreDismissals(existing, eventKeys) {
+    const drop = new Set((eventKeys || []).map(String));
+    return normalizeDismissedList(existing).filter(d => !d.eventKeys.some(k => drop.has(k)));
   }
 
   function logTimestampMs(entry) {
@@ -1454,6 +1556,10 @@
     for (const m of (ctx && ctx.mugs) || []) {
       for (const k of (m && m.eventKeys) || []) if (k) mugSeen.add(k);
     }
+    // #14 — dismissed keys gate exactly like seen: fold them into BOTH the global
+    // seen-set (buys/sales/trades) and the mug gate so a dismissed row of any
+    // type is suppressed from staging until the user restores it.
+    for (const k of dismissedKeySet(ctx && ctx.dismissed)) { seen.add(k); mugSeen.add(k); }
     const txSeen = new Set(txs.map(txKey));
     const preview = {
       buys: [], sales: [], mugs: [], review: [], ignored: [], already: [],
@@ -2075,7 +2181,9 @@
     const staged = preview ? buildScanPreviewUi(preview, results.length) : '';
     const debugSummary = Array.isArray(L.scanDebugSummary) ? L.scanDebugSummary : [];
     const debugUi = buildScanDebugSummaryUi(debugSummary);
-    if (!results.length && !setup && !staged && !debugUi) return '';
+    const foldCollapsed = ((mem && mem.ui && mem.ui.collapsed) || {});
+    const dismissedUi = buildDismissedUi(L.dismissed, foldCollapsed.scanDismissed !== false);
+    if (!results.length && !setup && !staged && !debugUi && !dismissedUi) return '';
     const n = results.length;
     const buyRows = results.length ? `
       <div class="rwth-form-title">${n} RW buy${n === 1 ? '' : 's'} ready</div>
@@ -2091,8 +2199,32 @@
       ${setup}
       ${staged}
       ${buyRows}
+      ${dismissedUi}
       ${debugUi}
       ${actions}
+    </div>`;
+  }
+
+  // #14 — the recoverable "Dismissed (N)" drawer. Lists rows the user unchecked
+  // and committed away; each carries a Restore that drops it from rwth_dismissed
+  // so it reappears on the next scan. Collapsed by default (recovery is rare).
+  function buildDismissedUi(dismissed, collapsed) {
+    const list = normalizeDismissedList(dismissed);
+    if (!list.length) return '';
+    const rows = list.map(d => {
+      const keys = escapeAttr(d.eventKeys.join('|'));
+      const label = d.type === 'mug' ? 'Mug'
+        : (d.itemName || (d.type === 'sale' ? 'Sale' : 'Buy'));
+      const amt = d.amount != null ? fmtMoney(d.amount) : '';
+      return `<div class="rwth-scan-line rwth-dismissed-line" data-dismissed="${keys}">
+        <span>${escapeAttr(label)}</span>
+        <span>${amt}</span>
+        <button class="rwth-btn rwth-btn-ghost" type="button" data-action="scan-restore" data-keys="${keys}">Restore</button>
+      </div>`;
+    }).join('');
+    return `<div class="rwth-scan-section rwth-scan-dismissed">
+      ${collapseHead(`Dismissed (${list.length})`, 'scanDismissed', collapsed)}
+      ${collapsed ? '' : rows}
     </div>`;
   }
 
@@ -4531,6 +4663,7 @@
         case 'run-scan':      LogScanner.scan(); break;
         case 'close-scan-setup': setState({ ledger: { ...MEM.ledger, scanSetupOpen: false } }); break;
         case 'confirm-scan':  confirmScan(); break;
+        case 'scan-restore':  restoreDismissed(actionEl.dataset.keys); break;
         case 'cancel-scan':   Store.set('rwth_scan', []);
                               Store.del('rwth_scan_preview');
                               Store.del(SCAN_DEBUG_SUMMARY_STORE);
@@ -5838,6 +5971,7 @@
         itemNames, cats,
         items: MEM.ledger.items,
         mugs: MEM.ledger.mugs,
+        dismissed: MEM.ledger.dismissed,   // #14 — suppress restored-nothing rows
         transactions: MEM.advertise.transactions,
       });
       scanDebug('preview built', {
@@ -6015,9 +6149,18 @@
     const transactions = newTx.length ? [...newTx, ...MEM.advertise.transactions] : MEM.advertise.transactions;
     if (newTx.length) Store.set('rwth_transactions', transactions);
 
+    // #14 — snapshot the rows the user unchecked (buys + mugs). Their keys go to
+    // the recoverable rwth_dismissed store, NOT the seen-set, so they stay
+    // suppressed yet restorable (fixes B1 lost buys / B2 zombie mugs).
+    const dismissals = collectDismissals(results, preview);
+    const dismissedKeys = dismissedKeySet(dismissals);
+    const dismissed = mergeDismissals(Store.get('rwth_dismissed'), dismissals);
+    Store.set('rwth_dismissed', dismissed);
+
     const seenKeys = scanSeenSet(Store.get('rwth_seen_log_events'));
     const oldWins = new Set(Store.get('rwth_seen_wins') || []);
     for (const hit of results) {
+      if (hit.checked === false) continue;   // #14 — unchecked buys → dismissed, not seen
       const keys = hit.eventKeys || [hit.eventKey || hit.key];
       for (const k of keys) {
         if (k) seenKeys.add(k);
@@ -6028,10 +6171,12 @@
     // Mug keys are intentionally excluded from the global seen-set: mugs dedupe
     // against the rwth_mugs store only (see buildScanPreview + the scan loop).
     // Writing them here is what previously trapped mugs as "already imported" on
-    // every rescan and stranded them out of the store at $0.
+    // every rescan and stranded them out of the store at $0. Dismissed keys are
+    // likewise excluded — they live in rwth_dismissed and gate from there (#14).
     const mugKeyPrefix = `${SCAN_LOG_TYPES.mugged}:`;
     for (const k of (preview && preview.eventKeys || [])) {
       if (String(k).startsWith(mugKeyPrefix)) continue;
+      if (dismissedKeys.has(String(k))) continue;
       seenKeys.add(k);
     }
     Store.set('rwth_seen_log_events', scanSeenStoreFromKeys([...seenKeys]));
@@ -6041,11 +6186,21 @@
     Store.del(SCAN_DEBUG_SUMMARY_STORE);
 
     setState({
-      ledger: { ...MEM.ledger, items, mugs, scanResults: [], scanPreview: null, scanDebugSummary: [], scanMessage: '' },
+      ledger: { ...MEM.ledger, items, mugs, dismissed, scanResults: [], scanPreview: null, scanDebugSummary: [], scanMessage: '' },
       advertise: { ...MEM.advertise, transactions },
     });
     // Scanned sales carry a numeric buyer id; resolve to names off the hot path.
     void resolveBuyerNames();
+  }
+
+  // #14 — Restore a dismissed row: drop its keys from rwth_dismissed so the row
+  // is no longer suppressed and reappears the next time the user scans.
+  function restoreDismissed(keysCsv) {
+    const keys = String(keysCsv || '').split('|').filter(Boolean);
+    if (!keys.length) return;
+    const dismissed = restoreDismissals(Store.get('rwth_dismissed'), keys);
+    Store.set('rwth_dismissed', dismissed);
+    setState({ ledger: { ...MEM.ledger, dismissed } });
   }
 
   // Parse the Log-a-sale textarea, match each sell to an open ledger row, and
@@ -10634,6 +10789,12 @@
     scanHitIsRwTradeable,
     buildScanPreview,
     buildScanSetup,
+    buildDismissedUi,
+    normalizeDismissedList,
+    dismissedKeySet,
+    collectDismissals,
+    mergeDismissals,
+    restoreDismissals,
     applyItemDetails,
     scanLogTypeLabel,
     scanLogFailureSummary,

@@ -421,3 +421,104 @@ test('buildScanPreview ignores an unrelated bazaar sale that is not an RW item',
 // NOTE: removed "mug events attach only when one sold row is clearly nearby" —
 // mugs no longer attach to a nearby sold row. They are staged as standalone flat
 // cash (no matchedId); see the flat-cash mug tests in test-rwth.js.
+
+// ─── S1 (#14): recoverable dismissal store + uniform unchecked semantics ──────
+
+test('collectDismissals snapshots an unchecked buy into a restorable entry', () => {
+  const buy = P.classifyLogEvent({
+    id: 'buy-dismiss',
+    timestamp: 1779280000,
+    data: { item: { id: 614, uid: 191, name: 'Diamond Bladed Knife' }, final_price: 75_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-dismiss', {}, {});
+
+  const preview = P.buildScanPreview([buy], { cats: {}, items: [], transactions: [] });
+  assert.strictEqual(preview.buys.length, 1);
+  assert.strictEqual(preview.buys[0].checked, true);
+
+  // User unchecks the buy in the preview, then commits.
+  const results = preview.buys.map(h => ({ ...h, checked: false }));
+  const dismissals = P.collectDismissals(results, preview);
+  assert.strictEqual(dismissals.length, 1);
+  assert.strictEqual(dismissals[0].type, 'buy');
+  assert.strictEqual(dismissals[0].itemName, 'Diamond Bladed Knife');
+  assert.ok(dismissals[0].eventKeys.length >= 1);
+});
+
+test('dismissed buy is suppressed on the next scan yet reappears after restore', () => {
+  const buy = P.classifyLogEvent({
+    id: 'buy-dismiss-2',
+    timestamp: 1779280000,
+    data: { item: { id: 614, uid: 192, name: 'Diamond Bladed Knife' }, final_price: 75_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-dismiss-2', {}, {});
+
+  const preview1 = P.buildScanPreview([buy], { cats: {}, items: [], transactions: [] });
+  const dismissals = P.collectDismissals(
+    preview1.buys.map(h => ({ ...h, checked: false })), preview1);
+
+  // Rescan with the dismissed key present: the buy is gated like "already seen".
+  const preview2 = P.buildScanPreview([buy], {
+    cats: {}, items: [], transactions: [], dismissed: dismissals,
+  });
+  assert.strictEqual(preview2.buys.length, 0);
+  assert.strictEqual(preview2.already.length, 1);
+
+  // Restore drops the entry; the buy stages again on the following scan.
+  const restored = P.restoreDismissals(dismissals, dismissals[0].eventKeys);
+  assert.strictEqual(restored.length, 0);
+  const preview3 = P.buildScanPreview([buy], {
+    cats: {}, items: [], transactions: [], dismissed: restored,
+  });
+  assert.strictEqual(preview3.buys.length, 1);
+});
+
+test('unchecked mug is dismissed and absent from the next preview', () => {
+  const mug = P.classifyLogEvent({
+    id: 'mug-dismiss',
+    timestamp: 1779372300,
+    data: { cash: 8_000_000, attacker: 'Mugger' },
+  }, P.SCAN_LOG_TYPES.mugged, 'mug-dismiss', {}, {});
+
+  const preview1 = P.buildScanPreview([mug], { cats: {}, items: [], transactions: [] });
+  assert.strictEqual(preview1.mugs.length, 1);
+
+  // User unchecks the mug, then commits → it lands in the dismissal store.
+  const unchecked = { ...preview1, mugs: preview1.mugs.map(m => ({ ...m, checked: false })) };
+  const dismissals = P.collectDismissals([], unchecked);
+  assert.strictEqual(dismissals.length, 1);
+  assert.strictEqual(dismissals[0].type, 'mug');
+
+  // Mugs gate against their own store; a dismissed mug must also be suppressed.
+  const preview2 = P.buildScanPreview([mug], {
+    cats: {}, items: [], transactions: [], dismissed: dismissals,
+  });
+  assert.strictEqual(preview2.mugs.length, 0);
+  assert.strictEqual(preview2.already.length, 1);
+});
+
+test('mergeDismissals dedupes by shared eventKey and normalizeDismissedList drops junk', () => {
+  const a = { eventKeys: ['4320:x'], type: 'buy', itemName: 'Knife', amount: 5, timestamp: 1 };
+  const merged = P.mergeDismissals([a], [a, { eventKeys: ['4322:y'], type: 'sale' }]);
+  assert.strictEqual(merged.length, 2);
+  // Re-merging the same key is a no-op.
+  assert.strictEqual(P.mergeDismissals(merged, [a]).length, 2);
+  // Junk entries (no eventKeys) are stripped.
+  assert.strictEqual(P.normalizeDismissedList([null, {}, { eventKeys: [] }, a]).length, 1);
+});
+
+test('dismissedKeySet flattens all eventKeys and buildDismissedUi renders restore rows', () => {
+  const list = [
+    { eventKeys: ['4320:a', '4320:b'], type: 'buy', itemName: 'Knife', amount: 100 },
+    { eventKeys: ['8156:c'], type: 'mug', itemName: 'Mug', amount: 50 },
+  ];
+  const keys = P.dismissedKeySet(list);
+  assert.strictEqual(keys.size, 3);
+  assert.ok(keys.has('4320:a') && keys.has('8156:c'));
+
+  const openUi = P.buildDismissedUi(list, false);
+  assert.match(openUi, /Dismissed \(2\)/);
+  assert.match(openUi, /data-action="scan-restore"/);
+  assert.match(openUi, /data-keys="4320:a\|4320:b"/);
+  // Empty list renders nothing; collapsed hides the rows but keeps the header.
+  assert.strictEqual(P.buildDismissedUi([], false), '');
+  assert.doesNotMatch(P.buildDismissedUi(list, true), /scan-restore/);
+});
