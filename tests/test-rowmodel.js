@@ -95,10 +95,53 @@ console.log('\nsold row');
   assertEq('buy present', m.buy, 1000);
   assertEq('ask = listPrice still present', m.ask, 1500);
   assertEq('net = saleNet', m.net, 1450);
-  assertEq('age buy-anchored (now - buy, not sold span)', m.age, 5);
+  // #21/2 — a sold row's age is time-to-sell (buy→sold). Here sold == now, so it
+  // reads 5, but the case below proves it freezes at the sale, not today.
+  assertEq('age = time-to-sell (buy→sold)', m.age, 5);
   assertEq('sold: realized ROI kind', m.roiKind, 'realized');
   assertEq('sold: realized ROI off (net-buy)/buy', m.roiPct, 0.45);
   assertEq('sold: never below cost', m.belowCost, false);
+}
+
+// ── #21/2 sold age = time-to-sell (buy→sold), frozen at the sale ──────────────
+
+console.log('\nsold age = time-to-sell');
+{
+  // Bought 10d before now, sold 3d before now → time-to-sell = 7d, NOT the 10d a
+  // now-anchored age would report and NOT growing further as `now` advances.
+  const m = RowModel.forItem(
+    sold({ buyTimestamp: NOW - 10 * DAY, soldTimestamp: NOW - 3 * DAY }), NOW);
+  assertEq('age = buy→sold span (7), not buy→now (10)', m.age, 7);
+
+  // Age is frozen: advancing `now` well past the sale does not move it.
+  const mLater = RowModel.forItem(
+    sold({ buyTimestamp: NOW - 10 * DAY, soldTimestamp: NOW - 3 * DAY }), NOW + 100 * DAY);
+  assertEq('age unchanged as now advances (still 7)', mLater.age, 7);
+
+  // Live rows are unaffected — still buy→now.
+  const mListed = RowModel.forItem(listed({ buyTimestamp: NOW - 4 * DAY }), NOW);
+  assertEq('listed age still now-anchored (4)', mListed.age, 4);
+
+  // A sold row missing its sold stamp yields null (never a bogus epoch span).
+  const mNoSold = RowModel.forItem(sold({ soldTimestamp: null }), NOW);
+  assertEq('sold, no sold stamp -> age null', mNoSold.age, null);
+
+  // Out-of-order (sold before buy) -> null, never negative.
+  const mBad = RowModel.forItem(
+    sold({ buyTimestamp: NOW - 2 * DAY, soldTimestamp: NOW - 5 * DAY }), NOW);
+  assertEq('sold before buy -> age null (never negative)', mBad.age, null);
+}
+
+// ── #21/2 colLabel: sold age column reads "to sell" ───────────────────────────
+
+console.log('\ncolLabel: to sell');
+{
+  const { colLabel } = globalThis.__RwthPure;
+  assertEq('sold age column labelled "to sell"', colLabel('age', 'sold'), 'to sell');
+  assertEq('held age column stays "age"', colLabel('age', 'held'), 'age');
+  assertEq('all age column stays "age"', colLabel('age', 'all'), 'age');
+  assertEq('held ask column stays "list"', colLabel('ask', 'held'), 'list');
+  assertEq('listed ask column stays "ask"', colLabel('ask', 'listed'), 'ask');
 }
 
 // ── below-cost: a listed ask below buy flags belowCost (loud loss marker) ──────

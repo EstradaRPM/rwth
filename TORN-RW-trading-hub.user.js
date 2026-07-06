@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.175
+// @version      0.3.176
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.175';
+  const SCRIPT_VERSION = '0.3.176';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1791,10 +1791,17 @@
       const buy = fin(it.buyPrice);
       const ask = fin(it.listPrice);
       const net = fin(it.saleNet);
-      // Guard the raw buy stamp here: spanDays coerces via Number(), so a null
-      // stamp would read as 0 (epoch) and yield a bogus multi-thousand-day age.
-      const age = (Number.isFinite(it.buyTimestamp) && Number.isFinite(now))
-        ? spanDays(it.buyTimestamp, now) : null;
+      // age spans from buy to the moment capital was committed out. A live row
+      // (held/listed) measures buy→now — how long money has actually been tied
+      // up. A SOLD row freezes at buy→soldTimestamp (time-to-sell) rather than
+      // growing to today forever (#21/2), which is the useful stat once banked.
+      // spanDays guards a non-finite/out-of-order stamp to null (never negative);
+      // the extra now guard keeps a non-finite `now` from reading as an age on a
+      // live row. A sold row with no sold stamp yields null via spanDays.
+      const age = it.status === 'sold'
+        ? spanDays(it.buyTimestamp, it.soldTimestamp)
+        : (Number.isFinite(it.buyTimestamp) && Number.isFinite(now))
+          ? spanDays(it.buyTimestamp, now) : null;
       // ROI distinguishes hope from banked money: a listed row projects off its
       // ask ((ask-buy)/buy), a sold row realizes off its net ((net-buy)/buy).
       // roiKind/roiPct stay null when there is no buy basis to divide by (0 or
@@ -1890,6 +1897,8 @@
   // list action, so it reads "list" there rather than "ask".
   function colLabel(col, status) {
     if (col === 'ask' && status === 'held') return 'list';
+    // #21/2 — a sold row's age is time-to-sell (buy→sold), so name it that.
+    if (col === 'age' && status === 'sold') return 'to sell';
     return col;
   }
 
@@ -10996,6 +11005,7 @@
     LedgerStats,
     RowModel,
     askCellV,
+    colLabel,
     LedgerSort,
     ChartGeom,
     buildAdvertiseTab,
