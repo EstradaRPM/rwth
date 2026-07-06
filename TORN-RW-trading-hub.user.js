@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.174
+// @version      0.3.175
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.174';
+  const SCRIPT_VERSION = '0.3.175';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1915,10 +1915,14 @@
         + ` data-id="${escapeAttr(id)}">list</button></span>`;
     }
     if (m.status === 'listed') {
-      const v = m.ask == null ? '' : m.ask;
+      // #21/1 — show compact money ($175m) at rest so a 9-digit ask never clips
+      // the 58px track (and reads like BUY), and carry the raw digits on data-raw
+      // so the render layer can swap them in on focus for exact editing.
+      const raw = m.ask == null ? '' : m.ask;
+      const disp = m.ask == null ? '' : fmtCompactMoney(m.ask);
       return `<span class="rwth-cell-v rwth-cell-ctl">`
         + `<input class="rwth-ask-edit" type="text" inputmode="numeric" data-ask-edit data-row-ctl`
-        + ` data-id="${escapeAttr(id)}" value="${escapeAttr(v)}" aria-label="ask price"></span>`;
+        + ` data-id="${escapeAttr(id)}" data-raw="${escapeAttr(raw)}" value="${escapeAttr(disp)}" aria-label="ask price"></span>`;
     }
     return valCell(m.ask == null ? null : fmtCompactMoney(m.ask));
   }
@@ -4817,6 +4821,9 @@
     // now the source of truth, so a close/reopen or reload rebuilds it intact.
     root.addEventListener('input', (e) => { syncScanEdit(e); syncScanPreviewEdit(e); syncScanSettings(e); syncAdvertiseEdit(e); syncKeyLock(e); syncLedgerRowEdit(e); });
     root.addEventListener('change', (e) => { syncScanEdit(e); syncScanPreviewEdit(e); syncScanSettings(e); syncAdvertiseEdit(e); syncKeyLock(e); syncLedgerRowEdit(e); syncSortSelect(e); persistSettingField(e); });
+    // #21/1 — inline ask input: expand to raw digits on focus, recompact on blur.
+    root.addEventListener('focusin', syncAskDisplay);
+    root.addEventListener('focusout', syncAskDisplay);
     // #340 — Enter commits the inline ask edit. A lone text input (not in a form)
     // does not blur on Enter by itself, so force the blur that fires `change`.
     root.addEventListener('keydown', (e) => {
@@ -5011,6 +5018,27 @@
     const n = numOrNull(el.value);
     if (n == null || n <= 0) { render(); return; }
     Ledger.update(id, { listPrice: n });
+  }
+
+  // #21/1 — the inline ask input reads as compact money ($175m) at rest but must
+  // be exact digits to edit. focusin swaps the compact display for the stored raw
+  // value (data-raw) and selects it; focusout with no commit (no `change`, so
+  // syncLedgerRowEdit never re-rendered) reformats back to compact so the cell
+  // never lingers on raw digits. A committed edit re-renders and replaces the
+  // input, so this focusout runs only on the unedited path.
+  function syncAskDisplay(e) {
+    const el = e.target;
+    if (!el || !el.matches || !el.matches('[data-ask-edit]')) return;
+    if (e.type === 'focusin') {
+      el.value = el.dataset.raw || '';
+      if (el.select) el.select();
+    } else if (e.type === 'focusout') {
+      // No commit fired (an edit would have re-rendered and replaced this input),
+      // so the stored ask still equals data-raw — reset the display to its
+      // compact form rather than leaving the raw digits showing.
+      const raw = el.dataset.raw;
+      el.value = raw ? fmtCompactMoney(Number(raw)) : '';
+    }
   }
 
   function syncScanEdit(e) {
@@ -10967,6 +10995,7 @@
     buildLedgerDashboard,
     LedgerStats,
     RowModel,
+    askCellV,
     LedgerSort,
     ChartGeom,
     buildAdvertiseTab,
