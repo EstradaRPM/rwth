@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.184
+// @version      0.3.185
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.184';
+  const SCRIPT_VERSION = '0.3.185';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -7235,9 +7235,9 @@
       .rwth-dash-v { white-space: nowrap; }
       .rwth-dash-stat b { font: 700 13px var(--rwth-font-mono); color: var(--rwth-text); }
       /* D2 #29: P/L is the reason the page exists — make it the visual lead in the
-         strip: heavier label, oversized figure, green (--rwth-accent) when positive. */
+         strip via heavier label + green (--rwth-accent) when positive. Figure size
+         matches the other stats so every value shares the strip's baseline grid. */
       .rwth-dash-lead { font-weight: 700; color: var(--rwth-secondary); }
-      .rwth-dash-lead b { font-size: 18px; }
       .rwth-dash-pos b { color: var(--rwth-accent); }
       /* D6 #30: a quiet chevron disclosure row matching the strip's chip styling —
          no border/fill, so it never competes with Refresh. Chrome stays cyan/muted;
