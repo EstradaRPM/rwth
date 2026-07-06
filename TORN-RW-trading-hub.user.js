@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.188
+// @version      0.3.189
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.188';
+  const SCRIPT_VERSION = '0.3.189';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -6924,7 +6924,13 @@
         transform-origin: bottom right;
         opacity: 0;
         pointer-events: none;
-        transition: transform .12s ease-out, opacity .12s ease-out;
+        /* transform/opacity drive open/close; the geometry props drive the
+           maximise toggle. They're disjoint sets, so the two animations never
+           fight — the panel grows out of / shrinks back into the bottom-right
+           corner (its transform-origin) on full-screen entry/exit. */
+        transition: transform .12s ease-out, opacity .12s ease-out,
+                    width .18s ease, height .18s ease,
+                    bottom .18s ease, right .18s ease, border-radius .18s ease;
       }
       #rwth-panel.rwth-open { transform: scale(1); opacity: 1; pointer-events: auto; }
       #rwth-panel.rwth-max {
@@ -6967,6 +6973,10 @@
       }
       #rwth-close:hover .rwth-ico-line, #rwth-close:active .rwth-ico-line { background: var(--rwth-accent); }
       #rwth-max:hover .rwth-ico-expand, #rwth-max:active .rwth-ico-expand { border-color: var(--rwth-accent); }
+      /* Box tracks window state: blue outline in the small panel (default,
+         --rwth-secondary above), green once maximised — a persistent "you are
+         full-screen" tell, not just a hover flash. */
+      #rwth-panel.rwth-max .rwth-ico-expand { border-color: var(--rwth-accent); }
 
       #rwth-tabs { display: flex; border-bottom: 1px solid var(--rwth-border); }
       .rwth-tab {
