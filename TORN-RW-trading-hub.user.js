@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.197
+// @version      0.3.198
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.197';
+  const SCRIPT_VERSION = '0.3.198';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -147,8 +147,12 @@
 
   // The shipped presets. Midnight is the neutral default and reproduces the
   // original hand-inlined palette verbatim, so an upgrading install sees no
-  // change until they pick another theme. Crimson and Steel are complete,
-  // hand-tuned alternatives. Render order = dropdown order; `key` persists.
+  // change until they pick another theme. The rest are complete, hand-tuned
+  // alternatives — five dark (Midnight, Crimson, Steel, Amethyst, Ember) and
+  // two light (Daylight, Parchment). Light presets invert the layering (light
+  // backgrounds, dark ink) while keeping every token defined, so the "no
+  // undefined token" invariant holds regardless of light/dark. Render order =
+  // dropdown order; `key` persists.
   const THEME_PRESETS = [
     {
       key: 'midnight', label: 'Midnight',
@@ -195,6 +199,66 @@
         rarWhite: '#dde4ea', rarYellow: '#e8d24a', rarOrange: '#e8993a', rarRed: '#e0625a',
       },
     },
+    {
+      key: 'amethyst', label: 'Amethyst',
+      tokens: {
+        bg: '#120a1a', bgDeep: '#0d0714', bgCard: '#1b1026', bgStrip: '#160d20',
+        bgPillPrimary: '#241533', bgPillAccent: '#221830',
+        bgChip: '#2a1838', bgChipMuted: '#241533', bgLink: '#301a44',
+        hairline: '#301c40', hairlinePrimary: '#3a2350', hairlineAccent: '#352348',
+        primary: '#c9a0f0', primaryStrong: '#b483ec', accent: '#f0a0d8',
+        textBody: '#d9cbe6', textMuted: '#a08ab0', textSoft: '#b8a3c8',
+        sep: '#43305a', warn: '#e0a85a', warnText: '#e8c98a',
+        catPrimary: '#b483ec', catSecondary: '#f0a0d8', catMelee: '#e0a85a',
+        catArmor: '#8ec0e0', catOther: '#a08ab0',
+        rarWhite: '#e2dce8', rarYellow: '#e8d24a', rarOrange: '#e8993a', rarRed: '#f06a62',
+      },
+    },
+    {
+      key: 'ember', label: 'Ember',
+      tokens: {
+        bg: '#17100a', bgDeep: '#110b06', bgCard: '#211710', bgStrip: '#1b120b',
+        bgPillPrimary: '#2c1d0f', bgPillAccent: '#2a1c12',
+        bgChip: '#33220f', bgChipMuted: '#2c1d0f', bgLink: '#3a2411',
+        hairline: '#3a2716', hairlinePrimary: '#45301a', hairlineAccent: '#402a18',
+        primary: '#f0b878', primaryStrong: '#eaa04f', accent: '#f0d060',
+        textBody: '#e6d6c4', textMuted: '#b09a80', textSoft: '#c8b49a',
+        sep: '#5a4030', warn: '#e0a85a', warnText: '#e8c98a',
+        catPrimary: '#eaa04f', catSecondary: '#f0d060', catMelee: '#e07a4a',
+        catArmor: '#c8a0e0', catOther: '#b09a80',
+        rarWhite: '#e8ddd0', rarYellow: '#e8d24a', rarOrange: '#e8993a', rarRed: '#f06a62',
+      },
+    },
+    {
+      key: 'daylight', label: 'Daylight (light)',
+      tokens: {
+        bg: '#eef2f7', bgDeep: '#e2e8f0', bgCard: '#ffffff', bgStrip: '#f5f8fc',
+        bgPillPrimary: '#dceafe', bgPillAccent: '#e0e7ff',
+        bgChip: '#dbeafe', bgChipMuted: '#e8eef7', bgLink: '#dbeafe',
+        hairline: '#d3dbe6', hairlinePrimary: '#b8cdf0', hairlineAccent: '#c7d2fe',
+        primary: '#1d4ed8', primaryStrong: '#1e40af', accent: '#0e7490',
+        textBody: '#1f2937', textMuted: '#64748b', textSoft: '#475569',
+        sep: '#cbd5e1', warn: '#b45309', warnText: '#92400e',
+        catPrimary: '#1e40af', catSecondary: '#0e7490', catMelee: '#b45309',
+        catArmor: '#7c3aed', catOther: '#64748b',
+        rarWhite: '#475569', rarYellow: '#b7791f', rarOrange: '#c2410c', rarRed: '#dc2626',
+      },
+    },
+    {
+      key: 'parchment', label: 'Parchment (light)',
+      tokens: {
+        bg: '#f5efe3', bgDeep: '#eae0cf', bgCard: '#fdfaf3', bgStrip: '#faf5ea',
+        bgPillPrimary: '#e8dcc4', bgPillAccent: '#eadfce',
+        bgChip: '#e6d8bf', bgChipMuted: '#efe6d4', bgLink: '#e7ddc8',
+        hairline: '#ddd0b8', hairlinePrimary: '#cbb890', hairlineAccent: '#d4c4a0',
+        primary: '#8a5a2b', primaryStrong: '#6f4518', accent: '#9a6b1f',
+        textBody: '#3a3020', textMuted: '#8a7a5e', textSoft: '#6b5c42',
+        sep: '#d0c0a0', warn: '#b45309', warnText: '#92400e',
+        catPrimary: '#6f4518', catSecondary: '#9a6b1f', catMelee: '#a15a2a',
+        catArmor: '#6d4aa0', catOther: '#8a7a5e',
+        rarWhite: '#6b5c42', rarYellow: '#a9791f', rarOrange: '#b8541c', rarRed: '#c0392b',
+      },
+    },
   ];
   const ADV_THEME_DEFAULT = 'midnight';
 
@@ -216,6 +280,20 @@
   // A 3- or 6-digit hex colour. An override must match before the resolver will
   // apply it, preserving the "every token is a defined colour" invariant.
   const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+  // A curated contemporary swatch palette for the override picker — replaces the
+  // native <input type="color"> (which opens the OS colour dialog with raw RGB
+  // sliders). Five families of eight (neutrals, warm, green/teal, blue/cyan,
+  // purple/pink), spanning near-black to white so the same grid serves both dark
+  // backgrounds and bright accents. The hex box beneath the grid is the escape
+  // hatch for an exact colour outside these forty. Rendered eight-per-row.
+  const ADV_SWATCH_PALETTE = [
+    '#0a0e14', '#111827', '#1f2937', '#374151', '#6b7280', '#9ca3af', '#d1d5db', '#ffffff',
+    '#7f1d1d', '#dc2626', '#f87171', '#b45309', '#f97316', '#fbbf24', '#fcd34d', '#fde68a',
+    '#14532d', '#16a34a', '#4ade80', '#065f46', '#10b981', '#2dd4bf', '#5eead4', '#a7f3d0',
+    '#0e7490', '#06b6d4', '#38bdf8', '#1e3a8a', '#2563eb', '#60a5fa', '#93c5fd', '#bfdbfe',
+    '#4338ca', '#6366f1', '#8b5cf6', '#a78bfa', '#c084fc', '#d946ef', '#ec4899', '#f472b6',
+  ];
 
   // #320/#332 — where the shop sells. The Advertise tab exposes one checkbox per
   // location; the ticked boxes compose ONE availability sentence. `key` persists
@@ -462,6 +540,9 @@
       // Switching surface resets advSurfaceRaw to false (back to preview).
       advSurface: 'forum',     // 'forum' | 'bazaar' | 'signature'
       advSurfaceRaw: false,
+      // #318 — which Brand & look colour-override field has its swatch popover
+      // open (null = none). Only one is open at a time, mirroring settingsImgEdit.
+      advColorOpen: null,
     },
     ledger: {
       items: [],
@@ -4614,6 +4695,42 @@
     </div>`;
   }
 
+  // #318 — one Brand & look colour-override control. Replaces the native
+  // <input type="color"> (which opens the OS RGB-slider dialog) with a swatch
+  // trigger showing the current colour + hex; clicking it opens a popover of
+  // curated contemporary swatches (ADV_SWATCH_PALETTE) plus a hex escape hatch.
+  // `current` is the resolved token colour (preset value or override); `open`
+  // renders the popover. Pure builder — the swatch taps and hex edits route
+  // through the delegated handlers (pick-swatch action / data-adv-override).
+  function buildColorField(field, current, open) {
+    const cur = String(current || '').toLowerCase();
+    const swatches = ADV_SWATCH_PALETTE.map(c =>
+      `<button class="rwth-swatch${c.toLowerCase() === cur ? ' is-sel' : ''}" type="button"`
+      + ` data-action="pick-swatch" data-token="${field.token}" data-color="${c}"`
+      + ` style="background:${c}" title="${c}" aria-label="${c}"></button>`).join('');
+    const pop = open ? `
+                <div class="rwth-swatch-pop">
+                  <div class="rwth-swatch-grid">${swatches}</div>
+                  <label class="rwth-swatch-hexrow">
+                    <span class="rwth-field-label">Hex</span>
+                    <input class="rwth-field-input rwth-swatch-hex" data-adv-override="${field.token}"
+                           value="${escapeAttr(current)}" maxlength="7" spellcheck="false" autocomplete="off">
+                  </label>
+                </div>` : '';
+    return `
+            <div class="rwth-field rwth-adv-override">
+              <span class="rwth-field-label">${field.label}</span>
+              <div class="rwth-swatch-ctl">
+                <button class="rwth-swatch-btn${open ? ' is-open' : ''}" type="button"
+                        data-action="toggle-swatch" data-token="${field.token}">
+                  <span class="rwth-swatch-chip" style="background:${escapeAttr(current)}"></span>
+                  <span class="rwth-swatch-val">${escapeAttr(current)}</span>
+                </button>
+                ${pop}
+              </div>
+            </div>`;
+  }
+
   function buildAdvertiseTab(mem) {
     const A = (mem && mem.advertise) || {};
     const L = (mem && mem.ledger) || {};
@@ -4779,12 +4896,7 @@
         <div class="rwth-adv-overrides">
           <div class="rwth-form-title">Post colours</div>
           <div class="rwth-adv-override-grid">
-            ${ADV_OVERRIDE_FIELDS.map(f => `
-            <label class="rwth-field rwth-adv-override">
-              <span class="rwth-field-label">${f.label}</span>
-              <input class="rwth-color-input" type="color"
-                     data-adv-override="${f.token}" value="${theme[f.token]}">
-            </label>`).join('')}
+            ${ADV_OVERRIDE_FIELDS.map(f => buildColorField(f, theme[f.token], ui.advColorOpen === f.token)).join('')}
           </div>
           <div class="rwth-form-actions">
             <button class="rwth-btn rwth-btn-ghost" type="button" data-action="reset-colours">Reset colours to theme</button>
@@ -5031,6 +5143,9 @@
         case 'delete-item':   if (confirm('Delete this ledger item?')) Ledger.remove(id); break;
         case 'add-tx':        addTransaction(); break;
         case 'reset-colours': resetColourOverrides(); break;
+        case 'toggle-swatch': setState({ ui: { ...MEM.ui,
+                                advColorOpen: MEM.ui.advColorOpen === actionEl.dataset.token ? null : actionEl.dataset.token } }); break;
+        case 'pick-swatch':   pickColourSwatch(actionEl.dataset.token, actionEl.dataset.color); break;
         case 'clear-data':    clearAllData(); break;
         case 'remove-tx':     removeTransaction(id); break;
         case 'promote-tx':    promoteTransaction(id); break;
@@ -6782,6 +6897,20 @@
     render();
   }
 
+  // #318 — commit one swatch pick: write the token override, close the popover,
+  // and re-render so every output recolours. Ignores a malformed colour (the
+  // resolver would drop it anyway), keeping the "every token defined" invariant.
+  function pickColourSwatch(token, color) {
+    if (!token || !HEX_COLOR_RE.test(String(color || ''))) {
+      setState({ ui: { ...MEM.ui, advColorOpen: null } });
+      return;
+    }
+    const overrides = { ...(MEM.settings.themeOverrides || {}), [token]: color };
+    MEM.settings = { ...MEM.settings, themeOverrides: overrides };
+    Store.set('rwth_settings', MEM.settings);
+    setState({ ui: { ...MEM.ui, advColorOpen: null } });
+  }
+
   // Testing aid — wipe every rwth_ localStorage key (ledger, transactions,
   // settings, scan state, dict, caches) so the next load behaves like a fresh
   // install. Enumerates by prefix so it stays correct as new keys are added.
@@ -7769,11 +7898,35 @@
         display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--rwth-gap-sm);
       }
       .rwth-adv-override { gap: 4px; }
-      .rwth-color-input {
-        width: 100%; height: 30px; padding: 2px; cursor: pointer;
-        background: #111; border: 1px solid var(--rwth-border-strong); border-radius: var(--rwth-radius-ctl);
+      .rwth-swatch-ctl { position: relative; }
+      .rwth-swatch-btn {
+        display: flex; align-items: center; gap: 8px; width: 100%; height: 30px;
+        padding: 0 8px; cursor: pointer; text-align: left;
+        background: var(--rwth-panel); border: 1px solid var(--rwth-border-strong);
+        border-radius: var(--rwth-radius-ctl); color: var(--rwth-text);
       }
-      .rwth-color-input:focus { outline: none; border-color: var(--rwth-accent); }
+      .rwth-swatch-btn:hover { border-color: var(--rwth-border-strong); }
+      .rwth-swatch-btn.is-open { border-color: var(--rwth-accent); }
+      .rwth-swatch-chip {
+        flex: 0 0 auto; width: 16px; height: 16px; border-radius: var(--rwth-radius-ctl);
+        box-shadow: inset 0 0 0 1px #0006;
+      }
+      .rwth-swatch-val { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); letter-spacing: .02em; }
+      .rwth-swatch-pop {
+        position: absolute; top: 100%; left: 0; z-index: 6; width: 216px;
+        display: flex; flex-direction: column; gap: var(--rwth-gap-sm); margin-top: var(--rwth-gap-xs);
+        background: #0c1422; border: 1px solid var(--rwth-secondary-strong);
+        border-radius: var(--rwth-radius-ctl); padding: var(--rwth-gap-sm); box-shadow: 0 4px 12px #000a;
+      }
+      .rwth-swatch-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+      .rwth-swatch {
+        width: 100%; aspect-ratio: 1 / 1; padding: 0; cursor: pointer;
+        border: 1px solid #0006; border-radius: var(--rwth-radius-ctl);
+      }
+      .rwth-swatch:hover { transform: scale(1.12); border-color: #fff8; }
+      .rwth-swatch.is-sel { outline: 2px solid var(--rwth-accent); outline-offset: 1px; }
+      .rwth-swatch-hexrow { display: flex; flex-direction: column; gap: 4px; }
+      .rwth-swatch-hex { font-family: var(--rwth-font-mono); }
       .rwth-adv-market { margin-top: 6px; font: 11px var(--rwth-font-mono); color: #e0a85a; }
       .rwth-adv-market-net { color: var(--rwth-muted); }
       .rwth-adv-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -11427,6 +11580,10 @@
     matchSell,
     summarizeSells,
     AdvConfig,
+    THEME_PRESETS,
+    ADV_THEME_TOKENS,
+    ADV_OVERRIDE_FIELDS,
+    ADV_SWATCH_PALETTE,
     AvailabilityLine,
     AdvertiseGenerator,
     itemMarketListPrice,

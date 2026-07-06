@@ -25,7 +25,7 @@ globalThis.document = {};
 
 require('../TORN-RW-trading-hub.user.js');
 
-const { AdvConfig } = globalThis.__RwthPure;
+const { AdvConfig, THEME_PRESETS, ADV_THEME_TOKENS, ADV_OVERRIDE_FIELDS, ADV_SWATCH_PALETTE } = globalThis.__RwthPure;
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -156,7 +156,11 @@ console.log('\ntheme — unknown/missing falls back to default');
 
 console.log('\ntheme — each shipped preset is a complete token set');
 {
-  for (const key of ['midnight', 'crimson', 'steel']) {
+  // The named baseline presets plus every currently-shipped key (so newly added
+  // themes are held to the same completeness bar without editing this loop).
+  const keys = new Set(['midnight', 'crimson', 'steel', 'amethyst', 'ember', 'daylight', 'parchment']);
+  for (const p of THEME_PRESETS) keys.add(p.key);
+  for (const key of keys) {
     const { theme } = AdvConfig.resolve({ theme: key });
     assertEq(`${key} selected`, theme.themeKey, key);
     assert(`${key} defines every token as a hex colour`,
@@ -178,6 +182,40 @@ console.log('\ntheme — surrounding whitespace on a real key is tolerated');
 {
   const { theme } = AdvConfig.resolve({ theme: '  steel  ' });
   assertEq('whitespace-padded key still resolves', theme.themeKey, 'steel');
+}
+
+console.log('\ntheme — light presets invert the layering (light bg, dark ink)');
+{
+  // Rough luminance of a #rrggbb hex — enough to assert "light" vs "dark" intent.
+  const lum = (hex) => {
+    const h = hex.replace('#', '');
+    const s = h.length === 3 ? h.split('').map(c => c + c).join('') : h;
+    const r = parseInt(s.slice(0, 2), 16), g = parseInt(s.slice(2, 4), 16), b = parseInt(s.slice(4, 6), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  };
+  for (const key of ['daylight', 'parchment']) {
+    const { theme } = AdvConfig.resolve({ theme: key });
+    assert(`${key} has a light page background`, lum(theme.bg) > 0.7);
+    assert(`${key} has dark body text`, lum(theme.textBody) < 0.4);
+    assert(`${key} keeps its accent readable on light (not near-white)`, lum(theme.primary) < 0.7);
+  }
+}
+
+console.log('\nswatch palette — every entry is a valid 6-digit hex, sized for the grid');
+{
+  const hex6 = (v) => typeof v === 'string' && /^#[0-9a-fA-F]{6}$/.test(v);
+  assert('palette is a non-empty array', Array.isArray(ADV_SWATCH_PALETTE) && ADV_SWATCH_PALETTE.length > 0);
+  assert('palette length is a multiple of 8 (fills the 8-wide grid)', ADV_SWATCH_PALETTE.length % 8 === 0);
+  assert('every swatch is a 6-digit hex colour', ADV_SWATCH_PALETTE.every(hex6));
+  assert('no duplicate swatches', new Set(ADV_SWATCH_PALETTE.map(c => c.toLowerCase())).size === ADV_SWATCH_PALETTE.length);
+}
+
+console.log('\noverride fields — each targets a real, defined theme token');
+{
+  assert('override fields is a non-empty array', Array.isArray(ADV_OVERRIDE_FIELDS) && ADV_OVERRIDE_FIELDS.length > 0);
+  assert('every override targets a known theme token',
+    ADV_OVERRIDE_FIELDS.every(f => ADV_THEME_TOKENS.includes(f.token)));
+  assert('every override has a plain-language label', ADV_OVERRIDE_FIELDS.every(f => typeof f.label === 'string' && f.label.length > 0));
 }
 
 // ── colour overrides (#318) ───────────────────────────────────────────────────
