@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.189
+// @version      0.3.190
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.189';
+  const SCRIPT_VERSION = '0.3.190';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -6971,8 +6971,16 @@
         display: block; width: 13px; height: 13px;
         border: 2px solid var(--rwth-secondary); border-radius: 2px;
       }
-      #rwth-close:hover .rwth-ico-line, #rwth-close:active .rwth-ico-line { background: var(--rwth-accent); }
-      #rwth-max:hover .rwth-ico-expand, #rwth-max:active .rwth-ico-expand { border-color: var(--rwth-accent); }
+      /* :active gives press feedback everywhere; :hover is gated to real
+         pointers so a tap doesn't leave the icon stuck highlighted on mobile
+         — that sticky :hover is what made the maximise box read green even
+         after minimising back to the small panel. */
+      #rwth-close:active .rwth-ico-line { background: var(--rwth-accent); }
+      #rwth-max:active .rwth-ico-expand { border-color: var(--rwth-accent); }
+      @media (hover: hover) {
+        #rwth-close:hover .rwth-ico-line { background: var(--rwth-accent); }
+        #rwth-max:hover .rwth-ico-expand { border-color: var(--rwth-accent); }
+      }
       /* Box tracks window state: blue outline in the small panel (default,
          --rwth-secondary above), green once maximised — a persistent "you are
          full-screen" tell, not just a hover flash. */
