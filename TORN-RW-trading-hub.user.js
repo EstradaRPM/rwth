@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.192
+// @version      0.3.193
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.192';
+  const SCRIPT_VERSION = '0.3.193';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -3371,9 +3371,9 @@
           ${sortSel}
           <button class="rwth-btn rwth-btn-ghost rwth-btn-refresh" type="button" data-action="refresh"${
             scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : '⟳ Refresh'}</button>
-          <span class="rwth-scan-status">${escapeAttr(formatLastScanned(L.lastScan, now))}</span>
           <button class="rwth-btn rwth-btn-ghost rwth-btn-gear" type="button" data-action="toggle-scan-settings"
             aria-label="Scan settings" title="Scan settings" aria-expanded="${settingsOpen ? 'true' : 'false'}">⚙</button>
+          <span class="rwth-scan-status">${escapeAttr(formatLastScanned(L.lastScan, now))}</span>
         </div>
       </div>
       ${settingsOpen ? buildScanSettingsPopup(mem) : ''}
@@ -6402,12 +6402,18 @@
       });
       // #16 — persist lastScan so the since-last-scan window survives a reload.
       const scanCompletedAt = Date.now();
+      // Roll the visible "Scan back to" date forward to this scan's date, so the
+      // field always shows how far back we've already covered; asking for a deeper
+      // walk again means deliberately editing it back to an earlier date.
+      MEM.settings = { ...MEM.settings, scanBackTo: fmtDate(scanCompletedAt) };
+      Store.set('rwth_settings', MEM.settings);
       Store.set('rwth_scan', keptBuys);
       Store.set('rwth_scan_preview', staged);
       Store.set(SCAN_DEBUG_SUMMARY_STORE, scanDebugSummary);
       Store.set('rwth_last_scan', scanCompletedAt);
       setState({
         fetchError: null,
+        settings: MEM.settings,
         ledger: {
           ...MEM.ledger, scanning: false,
           scanResults: keptBuys, scanPreview: staged, scanDebugSummary, lastScan: scanCompletedAt,
@@ -7154,7 +7160,18 @@
       /* #19 — the ⚙ scan-settings popup reuses the projection-pop shell; its
          relocated sellbox drops its own border so it reads as one panel. */
       .rwth-scan-settings .rwth-sellbox { border: 0; padding: 0; }
-      .rwth-btn-gear { padding-left: 9px; padding-right: 9px; }
+      /* The ⚙ gear tracks the scan-settings popup: cyan when closed, green while
+         open (aria-expanded) — a persistent "settings are open" tell. The shared
+         ghost :hover greens it, so for the gear we override that and re-gate the
+         green to real pointers: a tap on mobile no longer leaves the gear stuck
+         green after the popup closes (same fix as the header icons). The
+         two-class selector outweighs .rwth-btn-ghost:hover regardless of order. */
+      .rwth-btn-gear { padding-left: 9px; padding-right: 9px; color: var(--rwth-secondary); }
+      .rwth-btn.rwth-btn-gear:hover { color: var(--rwth-secondary); border-color: var(--rwth-border-strong); }
+      .rwth-btn-gear[aria-expanded="true"] { color: var(--rwth-accent); border-color: var(--rwth-accent); }
+      @media (hover: hover) {
+        .rwth-btn.rwth-btn-gear:hover { color: var(--rwth-accent); border-color: var(--rwth-accent); }
+      }
       .rwth-scan-sources,
       .rwth-scan-chips {
         display: flex; flex-wrap: wrap; gap: 6px;
