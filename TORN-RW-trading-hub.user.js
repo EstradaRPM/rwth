@@ -1749,8 +1749,8 @@
     if (abs >= 1_000) return `${sign}$${round1(abs / 1_000)}k`;
     return `${sign}$${Math.round(abs).toLocaleString('en-US')}`;
   }
-  // #28/D5 — same compact money without the repeated `$`, so the BUY/ASK/NET
-  // figure cells align on a bare numeric unit down each right-aligned track
+  // #28/D5 — same compact money without the repeated `$`, so the figure cells
+  // (buy/ask/sold/P·L) align on a bare numeric unit down each right-aligned track
   // (the column header already carries the label). Keeps the k/m/b suffix and
   // the leading sign; only the currency glyph is dropped.
   function fmtCompactNum(n) {
@@ -1909,7 +1909,7 @@
   const COLUMN_SETS = {
     held:   ['buy', 'ask', 'age'],          // ask column = one-click "list"
     listed: ['buy', 'ask', 'roi'],          // ask column = inline price input
-    sold:   ['buy', 'net', 'roi', 'age'],
+    sold:   ['buy', 'sold', 'pl', 'roi', 'age'],
     all:    ['buy', 'roi', 'age'],
   };
   // Header label for a column under a status. Held's ask column is the one-click
@@ -1918,6 +1918,9 @@
     if (col === 'ask' && status === 'held') return 'list';
     // #21/2 — a sold row's age is time-to-sell (buy→sold), so name it that.
     if (col === 'age' && status === 'sold') return 'to sell';
+    // The realized dollar profit/loss column reads "P/L" (its value is
+    // saleNet − buy); the proceeds column keeps its bare key label "sold".
+    if (col === 'pl') return 'P/L';
     return col;
   }
 
@@ -1970,6 +1973,19 @@
     return `<span class="rwth-cell-v rwth-roi ${pl}">${body}</span>`;
   }
 
+  // The realized dollar P/L cell for a sold row: saleNet − buy, banked money in
+  // the same compact bare unit as buy/sold, signed (+ prefixed when ≥0; the
+  // formatter already carries the − for losses) and colored with the SAME
+  // pos/neg tokens the ROI cell uses so a win/loss reads one way everywhere. A
+  // missing net leg renders the dimmed em-dash like any not-set leg. buy is
+  // treated as 0 when absent, matching the biggestPl sort's rowPl (#341).
+  function plCellV(m) {
+    if (m.net == null) return valCell(null);
+    const pl = m.net - (m.buy || 0);
+    const body = (pl >= 0 ? '+' : '') + fmtCompactNum(pl);
+    return valCell(body, pl >= 0 ? 'rwth-roi-pos' : 'rwth-roi-neg');
+  }
+
   // One row's figure cells for the active status's column set — label-less and in
   // the same order as the header. Reads the RowModel projection `m`; legs the
   // model leaves null render the em-dash via valCell.
@@ -1983,6 +1999,12 @@
       switch (col) {
         case 'buy': return valCell(m.buy == null ? null : fmtCompactNum(m.buy));
         case 'ask': return askCellV(m, id);
+        // 'sold' = net-of-fees proceeds (saleNet); 'pl' = realized dollar
+        // profit/loss (saleNet − buy), signed and P/L-colored (reusing the ROI
+        // win/loss classes). Both key off the same saleNet leg, so a null net
+        // renders the dimmed em-dash for both (like any not-set leg).
+        case 'sold': return valCell(m.net == null ? null : fmtCompactNum(m.net));
+        case 'pl': return plCellV(m);
         case 'net': return valCell(m.net == null ? null : fmtCompactNum(m.net));
         case 'roi': return roiCellV(m);
         case 'age': return valCell(m.age == null ? null : m.age + 'd', ageCls);
@@ -7374,7 +7396,7 @@
       }
       .rwth-cols-held   { grid-template-columns: minmax(0, 1fr) 58px 58px 48px; }
       .rwth-cols-listed { grid-template-columns: minmax(0, 1fr) 58px 58px 58px; }
-      .rwth-cols-sold   { grid-template-columns: minmax(0, 1fr) 56px 56px 56px 46px; }
+      .rwth-cols-sold   { grid-template-columns: minmax(0, 1fr) 56px 56px 56px 56px 46px; }
       .rwth-cols-all    { grid-template-columns: minmax(0, 1fr) 58px 58px 48px; }
       .rwth-thead {
         position: sticky; top: 0; z-index: 1; padding-top: 4px; padding-bottom: 4px;

@@ -479,6 +479,52 @@ test('#28/D5 — BUY/ASK/ROI align on a bare unit under the shared column track'
   assert.doesNotMatch(html, /rwth-cell-v[^>]*>\$\d/);
 });
 
+test('sold tab: net→"sold" proceeds column plus a true P/L column', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  // buy 600k, saleNet 900k → proceeds "900k", P/L +300k (win → pos).
+  const html = buildLedgerTab({ ledger: { items: [soldItem], statusFilter: 'sold' } });
+  // Header + row share the sold grid track and name the new columns.
+  assert.match(html, /class="rwth-thead rwth-cols-sold"/);
+  assert.match(html, /class="rwth-row-head rwth-cols-sold"/);
+  assert.match(html, /<span class="rwth-th">sold<\/span>/);
+  assert.match(html, /<span class="rwth-th">P\/L<\/span>/);
+  // The old NET header label is gone.
+  assert.doesNotMatch(html, /<span class="rwth-th">net<\/span>/);
+  // Proceeds cell shows saleNet as a bare compact unit; P/L cell shows the
+  // signed profit coloured with the ROI win token.
+  assert.match(html, /class="rwth-cell-v">900k<\/span>/);
+  assert.match(html, /class="rwth-cell-v rwth-roi-pos">\+300k<\/span>/);
+});
+
+test('sold tab: P/L cell goes red and signed on a realized loss', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const loss = { ...soldItem, id: 'loss', buyPrice: 600000, saleNet: 400000 };
+  const html = buildLedgerTab({ ledger: { items: [loss], statusFilter: 'sold' } });
+  assert.match(html, /class="rwth-cell-v">400k<\/span>/);           // proceeds
+  assert.match(html, /class="rwth-cell-v rwth-roi-neg">-200k<\/span>/); // P/L loss
+});
+
+test('sold tab: null saleNet dims both the sold and P/L cells', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const noNet = { ...soldItem, id: 'nonet', buyPrice: 600000, saleNet: null };
+  const html = buildLedgerTab({ ledger: { items: [noNet], statusFilter: 'sold' } });
+  // Two em-dash cells (sold + P/L) render as dimmed empty legs; no P/L colour
+  // leaks into the row's figure cells.
+  const rowHead = html.match(/<div class="rwth-row-head rwth-cols-sold"[\s\S]*?<\/div>/)[0];
+  const empties = rowHead.match(/class="rwth-cell-v rwth-cell-empty">—<\/span>/g) || [];
+  assert.ok(empties.length >= 2, 'both sold and P/L render the dimmed em-dash');
+  assert.doesNotMatch(rowHead, /rwth-roi-pos|rwth-roi-neg/);
+});
+
+test('sold tab: .rwth-cols-sold declares one grid track per cell (name + 5 figures)', () => {
+  // name + buy + sold + P/L + roi + to-sell = 6 explicit tracks, else the last
+  // cell falls into an implicit auto track and the figures drift out of column.
+  const m = SCRIPT_SOURCE.match(/\.rwth-cols-sold\s*\{\s*grid-template-columns:([^;}]*)/);
+  assert.ok(m, 'rwth-cols-sold grid-template-columns declared');
+  const trackCount = m[1].trim().split(/\s+(?![^(]*\))/).length;
+  assert.strictEqual(trackCount, 6, 'sold grid must have 6 tracks');
+});
+
 test('held tab: header + rows share the rwth-cols-held track, and the track has one column per cell', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
   const held = { ...heldItem, id: 'hgrid', status: 'held', buyPrice: 100000000 };
