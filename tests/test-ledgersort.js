@@ -1,6 +1,7 @@
 // node test-ledgersort.js
 // Tests for LedgerSort (#341) — the pure comparator map the ledger bar sorts by.
-// Each comparator runs over RowModel output: newest/oldest key on buyTimestamp,
+// Each comparator runs over RowModel output: newest keys on buyTimestamp, stalest
+// on the age of LIVE capital only (held/listed with an agingLevel; sold sinks),
 // bestRoi on the mixed projected/realized roiPct, biggestPl on realized P/L
 // (sold) vs projected ask-buy (listed). Null keys must sink to the bottom and
 // equal keys must keep input order (stable). Loads the shipped .user.js directly
@@ -59,20 +60,35 @@ const soldLo  = row('soldLo',  { status: 'sold',   buyPrice: 1000, saleNet: 900,
 
 const mixed = [held, listA, listB, soldHi, soldLo];
 
-// ── newest / oldest key on buyTimestamp; nulls sink ───────────────────────────
+// ── newest keys on buyTimestamp; nulls sink ───────────────────────────────────
 
-console.log('\nnewest / oldest (buyTimestamp)');
+console.log('\nnewest (buyTimestamp)');
 {
   assertEq('newest = most recent buy first',
     order(mixed, LedgerSort.newest).join(','), 'listB,listA,held,soldHi,soldLo');
-  assertEq('oldest = earliest buy first',
-    order(mixed, LedgerSort.oldest).join(','), 'soldLo,soldHi,held,listA,listB');
 
   const noStamp = row('noStamp', { status: 'held', buyPrice: 1000, buyTimestamp: null });
   assertEq('newest: stampless row sinks to bottom',
     order([noStamp, listA, listB], LedgerSort.newest).join(','), 'listB,listA,noStamp');
-  assertEq('oldest: stampless row STILL sinks to bottom (not treated as oldest)',
-    order([noStamp, listA, listB], LedgerSort.oldest).join(','), 'listA,listB,noStamp');
+}
+
+// ── stalest: age of LIVE capital only, longest first; sold + stampless sink ────
+
+console.log('\nstalest (age of live held/listed capital)');
+{
+  // held 10d > listA 5d > listB 2d (all live, agingLevel ok); soldHi/soldLo have
+  // banked out (null key) so they sink, keeping their input order.
+  assertEq('stalest = longest-held live capital first, sold sinks',
+    order(mixed, LedgerSort.stalest).join(','), 'held,listA,listB,soldHi,soldLo');
+
+  // The whole point of the swap: a SOLD row bought long ago is banked, not stale,
+  // so a younger live row outranks it (an "oldest buy" sort would invert this).
+  assertEq('stalest: young live row beats an older-bought sold row',
+    order([soldLo, held], LedgerSort.stalest).join(','), 'held,soldLo');
+
+  const noStamp = row('noStamp', { status: 'held', buyPrice: 1000, buyTimestamp: null });
+  assertEq('stalest: stampless (null age) live row sinks to bottom',
+    order([noStamp, listA, listB], LedgerSort.stalest).join(','), 'listA,listB,noStamp');
 }
 
 // ── bestRoi: projected (listed) and realized (sold) interleaved on one scale ───
@@ -115,15 +131,15 @@ console.log('\nnull keys sink to the bottom (all comparators)');
     order(heldOnly, LedgerSort.biggestPl).join(','), 'h1,h2');
 
   // held carries a real buy stamp but null roiPct/PL: it sinks ONLY on the ROI
-  // and P/L sorts, while newest/oldest still order it by its (valid) stamp.
+  // and P/L sorts, while newest/stalest still order it by its (valid) age/stamp.
   assertEq('bestRoi: null-ROI held sinks below a live listed row',
     order([held, listA], LedgerSort.bestRoi).join(','), 'listA,held');
   assertEq('biggestPl: null-PL held sinks below a live listed row',
     order([held, listA], LedgerSort.biggestPl).join(','), 'listA,held');
   assertEq('newest: held keeps stamp order (older than listA)',
     order([held, listA], LedgerSort.newest).join(','), 'listA,held');
-  assertEq('oldest: held keeps stamp order (older than listA -> first)',
-    order([held, listA], LedgerSort.oldest).join(','), 'held,listA');
+  assertEq('stalest: held is older live capital than listA -> first',
+    order([held, listA], LedgerSort.stalest).join(','), 'held,listA');
 }
 
 // ── stable / deterministic ties ───────────────────────────────────────────────
@@ -135,7 +151,7 @@ console.log('\nstable ties (equal keys keep input order)');
   const t2 = row('t2', { status: 'listed', buyPrice: 1000, listPrice: 1500, buyTimestamp: NOW });
   const t3 = row('t3', { status: 'listed', buyPrice: 1000, listPrice: 1500, buyTimestamp: NOW });
   const tied = [t1, t2, t3];
-  for (const id of ['newest', 'oldest', 'bestRoi', 'biggestPl']) {
+  for (const id of ['newest', 'stalest', 'bestRoi', 'biggestPl']) {
     assertEq(`${id}: equal keys preserve input order`,
       order(tied, LedgerSort[id]).join(','), 't1,t2,t3');
     // Comparator returns exactly 0 for a true tie (relied on for stability).

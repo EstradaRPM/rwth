@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.190
+// @version      0.3.191
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.190';
+  const SCRIPT_VERSION = '0.3.191';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -421,7 +421,7 @@
       activeTab: 'ledger', // 'ledger' | 'advertise' | 'settings'
       // #341 — ledger sort id, persisted under rwth_sort. Newest is the default
       // so the first open after upgrade does not surprise-reorder the list.
-      sort: 'newest',      // 'newest' | 'oldest' | 'bestRoi' | 'biggestPl'
+      sort: 'newest',      // 'newest' | 'stalest' | 'bestRoi' | 'biggestPl'
       // #361 — selected period for the projection popup/chart display.
       projectionPeriod: 'month', // 'day' | 'week' | 'month' | 'quarter' | 'year'
       projectionPanelOpen: false,
@@ -1865,7 +1865,7 @@
   // biggestPl mixes realized P/L (net-buy, sold) with projected (ask-buy, listed).
   const SORT_OPTIONS = [
     ['newest',    'Newest'],
-    ['oldest',    'Oldest'],
+    ['stalest',   'Most Aged'],
     ['bestRoi',   'Best ROI%'],
     ['biggestPl', 'Biggest P/L'],
   ];
@@ -1882,7 +1882,7 @@
   }
 
   // dir = -1 descending, +1 ascending. Null keys always sort last (after both
-  // directions), so the "sink to the bottom" rule holds for oldest as well.
+  // directions), so the "sink to the bottom" rule holds for stalest as well.
   function cmpNullsLast(av, bv, dir) {
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
@@ -1891,9 +1891,18 @@
     return av < bv ? -dir : dir;
   }
 
+  // Staleness key: age of LIVE capital only. RowModel sets agingLevel (ok/amber/
+  // red) on held+listed rows with a finite buy-anchored age, and leaves it null
+  // on sold (banked) or stampless rows — so keying off it surfaces the money
+  // that's actually been tied up longest and sinks banked/dead stock. age itself
+  // is buy→now for live rows, exactly the "how long has this been sitting" span.
+  function rowStale(m) {
+    return m && m.agingLevel != null ? m.age : null;
+  }
+
   const LedgerSort = {
     newest:    (a, b) => cmpNullsLast(a.buyTimestamp, b.buyTimestamp, -1),
-    oldest:    (a, b) => cmpNullsLast(a.buyTimestamp, b.buyTimestamp,  1),
+    stalest:   (a, b) => cmpNullsLast(rowStale(a),    rowStale(b),    -1),
     bestRoi:   (a, b) => cmpNullsLast(a.roiPct,       b.roiPct,       -1),
     biggestPl: (a, b) => cmpNullsLast(rowPl(a),       rowPl(b),       -1),
   };
