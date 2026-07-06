@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.182
+// @version      0.3.183
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.182';
+  const SCRIPT_VERSION = '0.3.183';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -7199,12 +7199,16 @@
       .rwth-dash-lead { font-weight: 700; color: var(--rwth-secondary); }
       .rwth-dash-lead b { font-size: 18px; }
       .rwth-dash-pos b { color: var(--rwth-accent); }
+      /* D6 #30: a quiet chevron disclosure row matching the strip's chip styling —
+         no border/fill, so it never competes with Refresh. Chrome stays cyan/muted;
+         solid neon-green is reserved for positive numbers (green-discipline #29). */
       .rwth-dash-toggle {
-        flex: none; background: none; border: 1px solid var(--rwth-border-strong);
-        border-radius: var(--rwth-radius-ctl); color: var(--rwth-secondary); cursor: pointer; padding: 3px 8px;
-        font: 700 10px var(--rwth-font-mono); text-transform: uppercase;
+        flex: none; display: inline-flex; align-items: center; gap: 4px;
+        background: none; border: 0; border-radius: 0; padding: 3px 4px;
+        color: var(--rwth-muted); cursor: pointer;
+        font: 700 10px var(--rwth-font-mono); text-transform: uppercase; letter-spacing: .5px;
       }
-      .rwth-dash-toggle:hover { color: var(--rwth-accent); border-color: var(--rwth-accent); }
+      .rwth-dash-toggle:hover { color: var(--rwth-secondary); }
       .rwth-dash-drawer { display: flex; flex-direction: column; gap: var(--rwth-gap-lg); }
       .rwth-collapsed { display: none; }
       .rwth-stats {

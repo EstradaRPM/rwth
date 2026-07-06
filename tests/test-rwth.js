@@ -1271,6 +1271,32 @@ test('D1 border ramp is neutralized (no cyan-alpha border literals)', () => {
   assert.match(root, /--rwth-secondary:\s*#00e5ff/, 'secondary should remain cyan');
 });
 
+// ── Ledger redesign D6 — charts drawer inherits the system (#30) ─────────────
+test('D6 dashboard drawer/cards use the shared card radius token', () => {
+  // strip, stat cards, and hero all sit on --rwth-radius-card (6px), no raw px.
+  for (const sel of ['.rwth-dash-strip ', '.rwth-stat ', '.rwth-hero ']) {
+    const start = SCRIPT_SOURCE.indexOf(sel + '{');
+    assert.notStrictEqual(start, -1, `${sel} rule should exist`);
+    const block = SCRIPT_SOURCE.slice(start, SCRIPT_SOURCE.indexOf('}', start));
+    assert.match(block, /border-radius:\s*var\(--rwth-radius-card\)/,
+      `${sel} should use the shared card radius token`);
+  }
+});
+
+test('D6 .rwth-dash-toggle drops the bordered-button styling for a quiet chevron row', () => {
+  const start = SCRIPT_SOURCE.indexOf('.rwth-dash-toggle {');
+  assert.notStrictEqual(start, -1, '.rwth-dash-toggle rule should exist');
+  const block = SCRIPT_SOURCE.slice(start, SCRIPT_SOURCE.indexOf('}', start));
+  assert.doesNotMatch(block, /border:\s*1px/, 'toggle should no longer be a bordered button');
+  assert.doesNotMatch(block, /border-radius:\s*var\(--rwth-radius-ctl\)/,
+    'toggle should drop the control-radius button chrome');
+  // Green-discipline (#29): chrome hover stays cyan, not neon-green.
+  const hoverStart = SCRIPT_SOURCE.indexOf('.rwth-dash-toggle:hover');
+  const hover = SCRIPT_SOURCE.slice(hoverStart, SCRIPT_SOURCE.indexOf('}', hoverStart));
+  assert.doesNotMatch(hover, /--rwth-accent/, 'toggle hover must not use the neon-green accent');
+  assert.match(hover, /--rwth-secondary/, 'toggle hover should read cyan');
+});
+
 test('bootstrap does not eagerly warm BB rate or item dictionary', () => {
   const start = SCRIPT_SOURCE.indexOf('function bootstrap()');
   const end = SCRIPT_SOURCE.indexOf('if (!TEST)', start);
