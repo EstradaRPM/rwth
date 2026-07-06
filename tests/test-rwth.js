@@ -1141,6 +1141,33 @@ test('WEAPON_CATEGORY constant is removed', () => {
   assert.ok(!/\bWEAPON_CATEGORY\b/.test(SCRIPT_SOURCE), 'WEAPON_CATEGORY references must be gone');
 });
 
+// ── Ledger redesign D1 — palette/radius tokens (#25) ─────────────────────────
+test('radius scale tokens are declared in :root', () => {
+  assert.match(SCRIPT_SOURCE, /--rwth-radius-card:\s*6px/, 'card radius token missing');
+  assert.match(SCRIPT_SOURCE, /--rwth-radius-ctl:\s*4px/, 'control radius token missing');
+});
+
+test('radius call sites reference tokens, not raw 3/4/6px', () => {
+  assert.doesNotMatch(SCRIPT_SOURCE, /border-radius:\s*(?:3|4|6)px/,
+    'ad-hoc 3/4/6px border-radius should point at --rwth-radius-* tokens');
+});
+
+test('D1 border ramp is neutralized (no cyan-alpha border literals)', () => {
+  // The border/fill ramp was retuned off cyan (#00e5ff??) toward near-neutral.
+  // --rwth-secondary / --rwth-secondary-strong stay cyan (secondary text/accent).
+  const rootStart = SCRIPT_SOURCE.indexOf(':root {');
+  const rootEnd = SCRIPT_SOURCE.indexOf('}', rootStart);
+  const root = SCRIPT_SOURCE.slice(rootStart, rootEnd);
+  for (const tok of ['--rwth-border-soft', '--rwth-border', '--rwth-border-strong',
+                     '--rwth-border-bright', '--rwth-fill-faint', '--rwth-fill-hover']) {
+    const m = root.match(new RegExp(tok.replace(/[-]/g, '\\-') + ':\\s*(#[0-9a-fA-F]+)'));
+    assert.ok(m, `${tok} should be declared`);
+    assert.ok(!/^#00e5ff/i.test(m[1]), `${tok} should be neutralized off cyan, got ${m[1]}`);
+  }
+  // Secondary accent stays cyan.
+  assert.match(root, /--rwth-secondary:\s*#00e5ff/, 'secondary should remain cyan');
+});
+
 test('bootstrap does not eagerly warm BB rate or item dictionary', () => {
   const start = SCRIPT_SOURCE.indexOf('function bootstrap()');
   const end = SCRIPT_SOURCE.indexOf('if (!TEST)', start);
