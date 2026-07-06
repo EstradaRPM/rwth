@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.176
+// @version      0.3.177
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.176';
+  const SCRIPT_VERSION = '0.3.177';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -741,9 +741,21 @@
 
   function norm(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
 
+  // Parse a money string to a Number, or null if it isn't one. Strips $, commas
+  // and whitespace, then accepts Torn's k/m/b shorthand (case-insensitive):
+  // 900k→900_000, 1.5m→1_500_000, 3.67b→3_670_000_000. A bare number is returned
+  // as-is, so the sell-log callers that pass already-numeric strings are
+  // unaffected (#21/3). Exposed via __RwthPure for the Node test seam.
   function parseMoney(s) {
     if (s == null) return null;
-    const n = Number(String(s).replace(/[,$\s]/g, ''));
+    const cleaned = String(s).replace(/[,$\s]/g, '');
+    const m = /^(-?(?:\d+\.?\d*|\.\d+))([kmb])?$/i.exec(cleaned);
+    if (m) {
+      const mult = { k: 1e3, m: 1e6, b: 1e9 }[(m[2] || '').toLowerCase()] || 1;
+      const n = Number(m[1]) * mult;
+      return Number.isFinite(n) ? n : null;
+    }
+    const n = Number(cleaned);
     return Number.isFinite(n) ? n : null;
   }
 
@@ -2133,7 +2145,8 @@
         </label>
         <label class="rwth-field rwth-field-grow">
           <span class="rwth-field-label">Buy price</span>
-          <input class="rwth-field-input" type="number" data-form="buyPrice" value="${escapeAttr(v.buyPrice)}">
+          <input class="rwth-field-input" type="text" inputmode="decimal" data-form="buyPrice"
+                 value="${escapeAttr(v.buyPrice)}" placeholder="e.g. 167.3m" autocomplete="off">
         </label>
       </div>
       <div class="rwth-form-row">
@@ -5024,7 +5037,11 @@
     const id = el.dataset.id;
     const item = (MEM.ledger.items || []).find(i => i.id === id);
     if (!item) return;
-    const n = numOrNull(el.value);
+    // #21/3 — parseMoney (not numOrNull) so the inline list price accepts Torn
+    // shorthand: 1.5m → 1_500_000, 3.67b → 3_670_000_000, and the compact display
+    // itself ($175m) round-trips. Blank/non-numeric/≤0 is rejected (re-render
+    // restores the stored value) so a bad keystroke never writes NaN.
+    const n = parseMoney(el.value);
     if (n == null || n <= 0) { render(); return; }
     Ledger.update(id, { listPrice: n });
   }
@@ -5605,7 +5622,8 @@
       bonuses,
       quality: numOrNull(get('quality')),
       rarity: get('rarity') || null,
-      buyPrice: numOrNull(get('buyPrice')) || 0,
+      // #21/3 — parseMoney so the buy field accepts Torn shorthand (167.3m, 1.5b).
+      buyPrice: parseMoney(get('buyPrice')) || 0,
       buyTimestamp,
       buySource: get('buySource') || 'market',
     };
@@ -11038,6 +11056,7 @@
     scanLogFailureSummary,
     pageFullWarnings,
     SellParser,
+    parseMoney,
     matchSell,
     summarizeSells,
     AdvConfig,
