@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.179
+// @version      0.3.180
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.179';
+  const SCRIPT_VERSION = '0.3.180';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -3205,9 +3205,10 @@
     const now = Date.now();
     const filtered = filter === 'all' ? items : items.filter(i => i.status === filter);
 
-    // Per-filter count + value rollup (#337/#362). Counts stay in the tap targets;
-    // large money tails move to a separate summary line so the four status filters
-    // do not fight sort/scan/add at the 360px docked panel width.
+    // Per-filter count + value rollup (#337/#362, #27). Counts stay in the tap
+    // targets; each status' money tail folds into its own chip as a subtitle
+    // (D4), collapsing the old standalone `.rwth-filter-summary` band so the
+    // ledger rises toward the top at the 360px docked panel width.
     const stats = LedgerStats.summarize(items, now, L.mugs || []);
     const bs = stats.byStatus;
     const chipMeta = {
@@ -3218,17 +3219,11 @@
     };
     const filterBtns = STATUS_FILTERS.map(f => {
       const m = chipMeta[f] || { count: 0 };
+      const money = m.value ? fmtChatPrice(m.value) : '';
+      const sub = money ? `<span class="rwth-filter-sub">${money} ${m.suffix}</span>` : '';
       return `<button class="rwth-filter${f === filter ? ' rwth-filter-active' : ''}" type="button"
-               data-filter="${f}" aria-pressed="${f === filter ? 'true' : 'false'}"><span class="rwth-filter-name">${f}</span> <span class="rwth-filter-count">(${m.count})</span></button>`;
+               data-filter="${f}" aria-pressed="${f === filter ? 'true' : 'false'}"><span class="rwth-filter-top"><span class="rwth-filter-name">${f}</span> <span class="rwth-filter-count">(${m.count})</span></span>${sub}</button>`;
     }).join('');
-    const filterSummary = STATUS_FILTERS
-      .map(f => {
-        const m = chipMeta[f] || {};
-        const money = m.value ? fmtChatPrice(m.value) : '';
-        return money ? `<span class="rwth-filter-val">${f}: ${money} ${m.suffix}</span>` : '';
-      })
-      .filter(Boolean)
-      .join('');
 
     const intel = (mem && mem.intel) || MEM.intel;
     const rowCtx = {
@@ -3266,17 +3261,16 @@
       <div class="rwth-ledger-bar">
         <div class="rwth-ledger-status">
           <div class="rwth-filters" role="group" aria-label="Ledger status filters">${filterBtns}</div>
-          ${filterSummary ? `<div class="rwth-filter-summary">${filterSummary}</div>` : ''}
         </div>
         <div class="rwth-ledger-actions">
           ${sortSel}
           <button class="rwth-btn" type="button" data-action="refresh"${
             scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : '⟳ Refresh'}</button>
+          <span class="rwth-scan-status">${escapeAttr(formatLastScanned(L.lastScan, now))}</span>
           <button class="rwth-btn rwth-btn-ghost rwth-btn-gear" type="button" data-action="toggle-scan-settings"
             aria-label="Scan settings" title="Scan settings" aria-expanded="${settingsOpen ? 'true' : 'false'}">⚙</button>
         </div>
       </div>
-      <div class="rwth-scan-status">${escapeAttr(formatLastScanned(L.lastScan, now))}</div>
       ${settingsOpen ? buildScanSettingsPopup(mem) : ''}
       ${err ? `<div class="rwth-form-error rwth-banner">${escapeAttr(err)}</div>` : ''}
       ${L.scanMessage && !err ? `<div class="rwth-placeholder">${escapeAttr(L.scanMessage)}</div>` : ''}
@@ -7002,8 +6996,8 @@
       .rwth-intel-add-row .rwth-field-input { width: auto; flex: 1; min-width: 120px; }
       #rwth-intel-add-tol { width: 70px; flex: none; }
 
-      .rwth-ledger { display: flex; flex-direction: column; gap: var(--rwth-gap-lg); container-type: inline-size; }
-      .rwth-ledger-bar { display: flex; flex-direction: column; align-items: stretch; gap: var(--rwth-gap-sm); }
+      .rwth-ledger { display: flex; flex-direction: column; gap: var(--rwth-gap-sm); container-type: inline-size; }
+      .rwth-ledger-bar { display: flex; flex-direction: column; align-items: stretch; gap: var(--rwth-gap-xs); }
       .rwth-ledger-status { display: flex; flex-direction: column; gap: var(--rwth-gap-xs); min-width: 0; }
       .rwth-ledger-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
       .rwth-btn:disabled { opacity: .5; cursor: default; box-shadow: none; }
@@ -7083,7 +7077,8 @@
       .rwth-scan-meta { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); }
       .rwth-scan-note { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); }
       .rwth-scan-note strong { color: var(--rwth-secondary); }
-      .rwth-scan-status { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); padding: 2px 2px 0; }
+      /* Inline Refresh status (D4 #27): sits right of the button, not a full band. */
+      .rwth-scan-status { font: 10px var(--rwth-font-mono); color: var(--rwth-muted); white-space: nowrap; }
       .rwth-scan-debug {
         display: flex; flex-direction: column; gap: 4px;
         border: 1px solid var(--rwth-border-soft); border-radius: var(--rwth-radius-ctl);
@@ -7116,18 +7111,20 @@
       .rwth-rarity-dot--red    { background: var(--rwth-rarity-red); }
       .rwth-filters { display: flex; gap: 4px; flex-wrap: wrap; }
       .rwth-filter {
+        display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
         background: none; border: 1px solid var(--rwth-border); border-radius: var(--rwth-radius-ctl);
-        color: var(--rwth-muted); cursor: pointer; padding: 6px 8px;
+        color: var(--rwth-muted); cursor: pointer; padding: 5px 8px;
         min-height: 30px; flex: 1 1 72px;
         font: 600 10px var(--rwth-font-mono); text-transform: uppercase; letter-spacing: .3px;
       }
       .rwth-filter:hover { color: var(--rwth-text); }
+      .rwth-filter-top { white-space: nowrap; }
       .rwth-filter-count { font-weight: 400; opacity: .75; }
-      .rwth-filter-summary {
-        display: flex; flex-wrap: wrap; gap: 2px 8px;
-        font: 10px var(--rwth-font-mono); color: var(--rwth-muted);
+      /* D4 (#27): status money folded into each chip as a subtitle. */
+      .rwth-filter-sub {
+        font-weight: 400; font-size: 9px; letter-spacing: 0; text-transform: none;
+        opacity: .8; white-space: nowrap;
       }
-      .rwth-filter-val { white-space: nowrap; }
       .rwth-filter-active { color: var(--rwth-bg); background: var(--rwth-accent); border-color: var(--rwth-accent); }
       .rwth-btn-add { padding: 5px 12px; }
       .rwth-sort { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }

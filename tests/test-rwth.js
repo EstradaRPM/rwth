@@ -278,13 +278,44 @@ test('buildLedgerTab keeps status filters separate from ledger actions', () => {
   assert.match(html, /class="rwth-ledger-status"/);
   assert.match(html, /aria-label="Ledger status filters"/);
   assert.match(html, /data-filter="all" aria-pressed="true"/);
-  assert.match(html, /<span class="rwth-filter-count">\(3\)<\/span><\/button>/);
-  assert.match(html, /<div class="rwth-filter-summary">/);
-  assert.match(html, /held: \$600k cost/);
-  assert.match(html, /listed: \$118m at ask/);
+  assert.match(html, /<span class="rwth-filter-count">\(3\)<\/span><\/span><\/button>/);
   assert.match(html, /data-sort-select aria-label="sort ledger"/);
   assert.match(html, /data-action="refresh"/);
   assert.match(html, /data-action="toggle-scan-settings"/);
+});
+
+// D4 (#27) — the standalone .rwth-filter-summary band is gone; each status
+// value now folds into its own chip as a subtitle via chipMeta value/suffix.
+test('buildLedgerTab folds status money into chip subtitles, drops the summary band', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const listed = { ...heldItem, id: 'c3', status: 'listed', listPrice: 118000000 };
+  const html = buildLedgerTab({
+    ledger: { items: [heldItem, listed, soldItem], statusFilter: 'all' },
+    ui: { sort: 'bestRoi' },
+  });
+
+  // No standalone summary band anymore.
+  assert.doesNotMatch(html, /rwth-filter-summary/);
+  // Each chip carries its value as a subtitle.
+  assert.match(html, /<span class="rwth-filter-sub">\$600k cost<\/span>/);
+  assert.match(html, /<span class="rwth-filter-sub">\$118m at ask<\/span>/);
+});
+
+// D4 (#27) — last-scanned text renders inline in the actions row (right of the
+// Refresh button), not as its own full-width band.
+test('buildLedgerTab renders last-scanned inline in the actions row', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const now = Date.now();
+  const lastScan = now - 5 * 60 * 1000;
+  const html = buildLedgerTab({ ledger: { items: [], lastScan } });
+
+  // The scan-status span sits inside the actions row, after the Refresh button.
+  const actions = html.match(/<div class="rwth-ledger-actions">[\s\S]*?<\/div>/);
+  assert.ok(actions, 'actions row present');
+  assert.match(actions[0], /data-action="refresh"[\s\S]*<span class="rwth-scan-status">/);
+  assert.match(actions[0], /Last scanned/);
+  // No standalone full-width scan-status <div> band.
+  assert.doesNotMatch(html, /<div class="rwth-scan-status">/);
 });
 
 test('buildLedgerDashboard renders solid realized and dashed projected chart lines', () => {
