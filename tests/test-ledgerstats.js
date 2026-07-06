@@ -433,6 +433,11 @@ function bucketCount(buckets, label) {
   return b ? b.count : undefined;
 }
 
+function bucketValue(buckets, label) {
+  const b = buckets.find(x => x.label === label);
+  return b ? b.value : undefined;
+}
+
 console.log('\nmarginBuckets — empty / no sold');
 {
   const s = LedgerStats.summarize([held(), listed()], NOW);
@@ -486,30 +491,109 @@ console.log('\nagingBuckets — buy-anchored via injected now');
   assertEq('only held+listed with stamps counted', s.agingBuckets.reduce((a, b) => a + b.count, 0), 5);
 }
 
-// ── venue split (#310) ────────────────────────────────────────────────────────
+// ── aging by value + dead capital (#310 rework) ──────────────────────────────
 
-console.log('\nvenueSplit — empty');
-{
-  const s = LedgerStats.summarize([held(), listed()], NOW);
-  assertEq('market count 0', s.venueSplit.market.count, 0);
-  assertEq('bazaar count 0', s.venueSplit.bazaar.count, 0);
-  assertEq('other count 0', s.venueSplit.other.count, 0);
-}
-
-console.log('\nvenueSplit — populated by count and value');
+console.log('\nagingValueBuckets — dollars per age band');
 {
   const s = LedgerStats.summarize([
-    sold({ soldVenue: 'market', buyPrice: 1000, saleNet: 1500 }),
-    sold({ soldVenue: 'market', buyPrice: 1000, saleNet: 2000 }),
-    sold({ soldVenue: 'bazaar', buyPrice: 1000, saleNet: 1200 }),
-    sold({ soldVenue: null,     buyPrice: 1000, saleNet: 900 }),
+    held({ buyPrice: 1000, buyTimestamp: NOW - 1 * DAY }),   // 1d   → 0–3d
+    listed({ buyPrice: 2000, buyTimestamp: NOW - 20 * DAY }),// 20d  → 14–30d
+    held({ buyPrice: 4000, buyTimestamp: NOW - 45 * DAY }),  // 45d  → 30d+
+    held({ buyPrice: 500, buyTimestamp: undefined }),        // no stamp → dropped
   ], NOW);
-  assertEq('market count', s.venueSplit.market.count, 2);
-  assertEq('market value', s.venueSplit.market.value, 3500);
-  assertEq('bazaar count', s.venueSplit.bazaar.count, 1);
-  assertEq('bazaar value', s.venueSplit.bazaar.value, 1200);
-  assertEq('unknown venue → other', s.venueSplit.other.count, 1);
-  assertEq('other value', s.venueSplit.other.value, 900);
+  assertEq('five value bands', s.agingValueBuckets.length, 5);
+  assertEq('0–3d $ = buy of the 1d row', bucketValue(s.agingValueBuckets, '0–3d'), 1000);
+  assertEq('14–30d $ = buy of the 20d row', bucketValue(s.agingValueBuckets, '14–30d'), 2000);
+  assertEq('30d+ $ = buy of the 45d row', bucketValue(s.agingValueBuckets, '30d+'), 4000);
+  assertEq('empty band is $0', bucketValue(s.agingValueBuckets, '7–14d'), 0);
+}
+
+console.log('\ndeadCapital — 30d+ dollars, share, oldest');
+{
+  const s = LedgerStats.summarize([
+    held({ buyPrice: 1000, buyTimestamp: NOW - 5 * DAY }),   // fresh
+    held({ buyPrice: 3000, buyTimestamp: NOW - 40 * DAY }),  // stale
+    listed({ buyPrice: 1000, buyTimestamp: NOW - 60 * DAY }),// stale + oldest
+  ], NOW);
+  assertEq('dead $ = 30d+ cost basis', s.deadCapital.amount, 4000);
+  assertEq('% of deployed capital', s.deadCapital.pct, 80); // 4000 / 5000
+  assertEq('oldest open position days', s.deadCapital.oldestDays, 60);
+}
+
+console.log('\ndeadCapital — none when all fresh');
+{
+  const s = LedgerStats.summarize([held({ buyTimestamp: NOW - 2 * DAY })], NOW);
+  assertEq('no dead capital', s.deadCapital.amount, 0);
+  assertEq('0% dead', s.deadCapital.pct, 0);
+}
+
+// ── fee drag + velocity (#310 rework) ────────────────────────────────────────
+
+console.log('\nfeePct — fees as a share of gross turnover');
+{
+  const s = LedgerStats.summarize([
+    sold({ buyPrice: 1000, saleNet: 1900, saleFees: 100 }), // gross 2000, fee 100
+    sold({ buyPrice: 1000, saleNet: 950,  saleFees: 50 }),  // gross 1000, fee 50
+  ], NOW);
+  // total fee 150 / total gross 3000 = 5%
+  assertEq('feePct', s.feePct, 5);
+}
+
+console.log('\nvelocityPctPerDay — ROI ÷ avg days-to-clear');
+{
+  const s = LedgerStats.summarize([
+    sold({ buyPrice: 1000, saleNet: 1500, buyTimestamp: NOW - 5 * DAY, soldTimestamp: NOW }),
+  ], NOW);
+  // realized 500, mug 0 → ROI 50% over a 5d clear → 10%/day
+  assertEq('velocity', s.velocityPctPerDay, 10);
+}
+
+console.log('\nvelocityPctPerDay — null with no clear time');
+{
+  const s = LedgerStats.summarize([held(), listed()], NOW);
+  assertEq('null velocity when no sales', s.velocityPctPerDay, null);
+}
+
+// ── sourcing edge (#310 rework) ──────────────────────────────────────────────
+
+console.log('\nsourcing — grouped by bonus/item/type, ranked by profit');
+{
+  const s = LedgerStats.summarize([
+    sold({ itemName: 'Riot Shield', category: 'Armor',   bonusName: 'Impregnable', buyPrice: 1000, saleNet: 3000 }), // +2000
+    sold({ itemName: 'Riot Shield', category: 'Armor',   bonusName: 'Impregnable', buyPrice: 1000, saleNet: 2000 }), // +1000
+    sold({ itemName: 'PGP',         category: 'Primary',  bonusName: 'Damage',      buyPrice: 1000, saleNet: 1500 }), // +500
+    sold({ itemName: 'Loss Item',   category: 'Primary',  bonusName: 'Damage',      buyPrice: 1000, saleNet: 800 }),  // -200
+  ], NOW);
+
+  // byBonus: Impregnable (+3000) ranks above Damage (+300)
+  assertEq('top bonus key', s.sourcing.byBonus[0].key, 'Impregnable');
+  assertEq('top bonus profit', s.sourcing.byBonus[0].profit, 3000);
+  assertEq('top bonus count', s.sourcing.byBonus[0].count, 2);
+  // capital-weighted margin: 3000 profit / 2000 cost = 150%
+  assertEq('top bonus capital-weighted margin', s.sourcing.byBonus[0].marginPct, 150);
+  assertEq('second bonus key', s.sourcing.byBonus[1].key, 'Damage');
+  assertEq('second bonus profit', s.sourcing.byBonus[1].profit, 300);
+
+  // byType: Armor (+3000) above Primary (+300)
+  assertEq('top type key', s.sourcing.byType[0].key, 'Armor');
+  assertEq('top type profit', s.sourcing.byType[0].profit, 3000);
+
+  // byItem: Riot Shield tops
+  assertEq('top item key', s.sourcing.byItem[0].key, 'Riot Shield');
+  assertEq('top item profit', s.sourcing.byItem[0].profit, 3000);
+}
+
+console.log('\nsourcing — bonus-less row lands in (unknown), cost-less excluded');
+{
+  const s = LedgerStats.summarize([
+    sold({ itemName: 'A', bonusName: undefined, bonuses: undefined, buyPrice: 1000, saleNet: 1400 }),
+    sold({ itemName: 'B', bonusName: undefined, bonuses: [{ name: 'Freshness' }], buyPrice: 1000, saleNet: 1200 }),
+    sold({ itemName: 'C', bonusName: 'Damage', buyPrice: 0, saleNet: 500 }), // no cost basis → excluded
+  ], NOW);
+  const keys = s.sourcing.byBonus.map(g => g.key);
+  assert('has (unknown) bucket', keys.includes('(unknown)'));
+  assert('reads bonus from bonuses[0].name', keys.includes('Freshness'));
+  assert('cost-less row excluded from sourcing', !keys.includes('Damage'));
 }
 
 // ── per-status rollups (#337) ─────────────────────────────────────────────────

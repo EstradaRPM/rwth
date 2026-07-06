@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.195
+// @version      0.3.196
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.195';
+  const SCRIPT_VERSION = '0.3.196';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -2666,17 +2666,22 @@
       // The sold loop sums gross flips (sale − cost); mug cash is netted off the
       // headline afterward so the total always reflects the mug drag even when a
       // mug can't be tied to any sale.
-      let realizedGross = 0, soldCost = 0, wins = 0, feesPaid = 0;
+      let realizedGross = 0, soldCost = 0, wins = 0, feesPaid = 0, grossSales = 0;
       let best = null, worst = null;
       for (const it of sold) {
         const profit = realizedProfit(it);
         realizedGross += profit;
         soldCost += cost(it);
-        feesPaid += fin(it.saleFees) || 0;
+        const fee = fin(it.saleFees) || 0;
+        feesPaid += fee;
+        grossSales += (fin(it.saleNet) || 0) + fee;
         if (profit > 0) wins++;
         if (!best  || profit > best.profit)  best  = { name: it.itemName, profit };
         if (!worst || profit < worst.profit) worst = { name: it.itemName, profit };
       }
+      // Fee drag as a share of gross turnover (sale + fee), so "how much of what
+      // buyers paid went to venue fees" reads independent of margin.
+      const feePct = grossSales > 0 ? round1((feesPaid / grossSales) * 100) : 0;
       const realized = realizedGross - mugLossTotal;
       const realizedRoiPct = soldCost > 0 ? round1((realized / soldCost) * 100) : 0;
       // ROI points the mugs cost: mugLoss / cost basis × 100. Equals the gap
@@ -2867,33 +2872,74 @@
       ];
 
       // Inventory aging — how long held + listed items have sat (buy-anchored,
-      // now − buyTimestamp via injected `now`), bucketed. Rows without a finite
-      // buy stamp (or a `now` in the future-relative sense) drop out.
-      const ageVals = open
-        .map(it => spanDays(it.buyTimestamp, now))
-        .filter(d => d != null);
-      const agingBuckets = [
-        { label: '0–3d',   count: ageVals.filter(d => d < 3).length },
-        { label: '3–7d',   count: ageVals.filter(d => d >= 3 && d < 7).length },
-        { label: '7–14d',  count: ageVals.filter(d => d >= 7 && d < 14).length },
-        { label: '14–30d', count: ageVals.filter(d => d >= 14 && d < 30).length },
-        { label: '30d+',   count: ageVals.filter(d => d >= 30).length },
+      // now − buyTimestamp via injected `now`). Each open row carries both its age
+      // and its cost, so we can bucket by count (agingBuckets) AND by dollars
+      // (agingValueBuckets) — the money frozen at each age is what actually
+      // matters. Rows without a finite buy stamp drop out.
+      const ageRows = open
+        .map(it => ({ d: spanDays(it.buyTimestamp, now), c: cost(it) }))
+        .filter(r => r.d != null);
+      const AGE_BANDS = [
+        { label: '0–3d',   lo: 0,  hi: 3 },
+        { label: '3–7d',   lo: 3,  hi: 7 },
+        { label: '7–14d',  lo: 7,  hi: 14 },
+        { label: '14–30d', lo: 14, hi: 30 },
+        { label: '30d+',   lo: 30, hi: Infinity },
       ];
+      const agingBuckets = AGE_BANDS.map(b => ({
+        label: b.label,
+        count: ageRows.filter(r => r.d >= b.lo && r.d < b.hi).length,
+      }));
+      const agingValueBuckets = AGE_BANDS.map(b => ({
+        label: b.label,
+        value: ageRows.filter(r => r.d >= b.lo && r.d < b.hi).reduce((a, r) => a + r.c, 0),
+      }));
 
-      // Venue split — market vs bazaar share of realized sales, by count and net
-      // value. An unknown/missing soldVenue falls into `other` so it's never lost.
-      const venueSplit = {
-        market: { count: 0, value: 0 },
-        bazaar: { count: 0, value: 0 },
-        other:  { count: 0, value: 0 },
+      // Dead capital — cash frozen in stock aged 30d+, as a dollar figure and a
+      // share of total deployed capital, plus the age of the oldest open position.
+      // The headline risk the aging bar is really about.
+      const deadAmount = ageRows.filter(r => r.d >= 30).reduce((a, r) => a + r.c, 0);
+      const deadCapital = {
+        amount: deadAmount,
+        pct: capitalDeployed > 0 ? round1((deadAmount / capitalDeployed) * 100) : 0,
+        oldestDays: ageRows.length ? Math.max(...ageRows.map(r => r.d)) : 0,
       };
-      for (const it of sold) {
-        const v = norm(it.soldVenue);
-        const bucket = v === 'market' ? venueSplit.market
-          : v === 'bazaar' ? venueSplit.bazaar : venueSplit.other;
-        bucket.count += 1;
-        bucket.value += fin(it.saleNet) || 0;
-      }
+
+      // Return velocity — ROI points earned per day of capital held. The truest
+      // flip edge (a fast thin flip can out-earn a slow fat one). Null when no
+      // clear time is known to divide by.
+      const velocityPctPerDay = avgDaysToClear > 0 ? round1(realizedRoiPct / avgDaysToClear) : null;
+
+      // Sourcing edge — where the money actually comes from. Group sold rows with a
+      // cost basis by bonus, item, and type; each group carries total profit, cost,
+      // capital-weighted margin (Σprofit/Σcost, so an n=1 lucky flip can't top the
+      // board on a naive mean), and sample count. Sorted by total profit desc — the
+      // user ranks by "what made me the most", with margin/n shown for judgement. A
+      // bonus-less row lands in '(unknown)' rather than being dropped.
+      const sourcingRows = sold.filter(it => cost(it) > 0);
+      const bonusKey = it => it.bonusName
+        || (it.bonuses && it.bonuses[0] && it.bonuses[0].name) || '(unknown)';
+      const typeKey = it => it.category
+        || (it.type === 'armor' ? 'Armor' : it.type === 'weapon' ? 'Weapon' : 'Other');
+      const groupSourcing = keyFn => {
+        const map = new Map();
+        for (const it of sourcingRows) {
+          const k = keyFn(it) || '(unknown)';
+          const g = map.get(k) || { key: k, profit: 0, cost: 0, count: 0 };
+          g.profit += realizedProfit(it);
+          g.cost   += cost(it);
+          g.count  += 1;
+          map.set(k, g);
+        }
+        return [...map.values()]
+          .map(g => ({ ...g, marginPct: g.cost > 0 ? round1((g.profit / g.cost) * 100) : 0 }))
+          .sort((a, b) => b.profit - a.profit);
+      };
+      const sourcing = {
+        byBonus: groupSourcing(bonusKey),
+        byItem:  groupSourcing(it => it.itemName),
+        byType:  groupSourcing(typeKey),
+      };
 
       // Per-status rollups so each filter chip can show its own count + value,
       // tying the table back to the dashboard at the point the user acts on it.
@@ -2923,10 +2969,10 @@
       return {
         realized, realizedRoiPct, pending, capitalDeployed,
         mugLossTotal, mugRoiPct,
-        winRate, avgDaysToClear, feesPaid,
+        winRate, avgDaysToClear, feesPaid, feePct, velocityPctPerDay,
         soldCount: sold.length, listedCount: listed.length,
         best, worst, cumulativeProfit, profitProjection,
-        marginBuckets, agingBuckets, venueSplit, byStatus,
+        marginBuckets, agingBuckets, agingValueBuckets, deadCapital, sourcing, byStatus,
       };
     },
   };
@@ -3163,53 +3209,108 @@
     </div>`;
   }
 
-  // One labelled bar mini-chart (#310): a small inline-SVG histogram over
-  // `buckets` ([{label, count}]) via ChartGeom.bars, with a per-bucket label row
-  // beneath that doubles as the data readout. Empty (all counts 0) shows a muted
-  // "no data" line rather than blank bars.
-  function buildLedgerMiniChart(title, buckets) {
-    const data = Array.isArray(buckets) ? buckets : [];
-    const total = data.reduce((a, b) => a + (b.count || 0), 0);
-    if (!total) {
-      return `<div class="rwth-mini">
-        <div class="rwth-mini-title">${title}</div>
-        <div class="rwth-mini-empty">no data yet</div>
+  // One horizontal distribution bar (#310, reworked): `buckets` ([{label, value,
+  // tone}]) become proportional flex segments (share of total → width%), each
+  // color-toned by health, with a per-bucket readout row beneath. Zero-value
+  // buckets are omitted from the bar (so a "0" reads as absence, never a black
+  // void) but still appear muted in the readout. A nonzero segment floors to a
+  // visible min-width. Empty (all zero) shows the muted "no data yet" line.
+  // `fmt` formats the readout figure (default: the raw value); pure, no SVG.
+  function buildDistBar(buckets, opts = {}) {
+    const data = (Array.isArray(buckets) ? buckets : [])
+      .map(b => ({ label: b.label, value: Number(b.value) || 0, tone: b.tone || 'neutral' }));
+    const total = data.reduce((a, b) => a + b.value, 0);
+    const fmt = typeof opts.fmt === 'function' ? opts.fmt : (v => String(v));
+    if (!total) return `<div class="rwth-distbar-empty">no data yet</div>`;
+    const segs = data.filter(b => b.value > 0).map(b =>
+      `<span class="rwth-seg rwth-seg-${b.tone}" style="width:${round1((b.value / total) * 100)}%" title="${escapeAttr(b.label)}: ${escapeAttr(fmt(b.value))}"></span>`
+    ).join('');
+    const cells = data.map(b =>
+      `<span class="rwth-distbar-cell${b.value > 0 ? '' : ' rwth-distbar-zero'}"><b>${escapeAttr(fmt(b.value))}</b>${escapeAttr(b.label)}</span>`
+    ).join('');
+    return `<div class="rwth-distbar">${segs}</div>
+      <div class="rwth-distbar-labels">${cells}</div>`;
+  }
+
+  // Sourcing leaderboard (#310): a compact table for one dimension (bonus / item /
+  // type). `rows` are pre-sorted groups ({key, profit, marginPct, count}); we show
+  // the top few by total profit with margin% and sample n alongside, profit tinted
+  // pos/neg. Empty → the muted "no data yet" line.
+  function buildSourcingTable(title, rows, limit = 3) {
+    const list = (Array.isArray(rows) ? rows : []).slice(0, limit);
+    if (!list.length) {
+      return `<div class="rwth-src">
+        <div class="rwth-src-h">${escapeAttr(title)}</div>
+        <div class="rwth-distbar-empty">no data yet</div>
       </div>`;
     }
-    const W = 300, H = 48;
-    const g = ChartGeom.bars(data.map(b => b.count), W, H, { pad: 2, gap: 6 });
-    const rects = g.rects.map(r =>
-      `<rect class="rwth-mini-bar" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="1"></rect>`
-    ).join('');
-    const labels = data.map(b =>
-      `<span class="rwth-mini-cell"><b>${b.count}</b>${escapeAttr(b.label)}</span>`
-    ).join('');
-    return `<div class="rwth-mini">
-      <div class="rwth-mini-title">${title}</div>
-      <svg class="rwth-mini-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${rects}</svg>
-      <div class="rwth-mini-labels">${labels}</div>
+    const body = list.map(r => {
+      const cls = r.profit >= 0 ? 'rwth-roi-pos' : 'rwth-roi-neg';
+      const sign = r.profit >= 0 ? '+' : '';
+      const mSign = r.marginPct >= 0 ? '+' : '';
+      return `<div class="rwth-src-row">
+        <span class="rwth-src-name" title="${escapeAttr(r.key)}">${escapeAttr(r.key)}</span>
+        <span class="rwth-src-profit ${cls}">${sign}${fmtCompactMoney(r.profit)}</span>
+        <span class="rwth-src-margin">${mSign}${r.marginPct}%</span>
+        <span class="rwth-src-n">n${r.count}</span>
+      </div>`;
+    }).join('');
+    return `<div class="rwth-src">
+      <div class="rwth-src-h">${escapeAttr(title)}</div>
+      ${body}
     </div>`;
   }
 
-  // Collapsible "more analytics" drawer (#310): the three secondary mini-charts
-  // below the hero, collapsed by default so the panel stays short on mobile.
-  // Follows the hub's existing collapseHead / toggle-collapse idiom.
+  // Collapsible "more analytics" drawer (#310, reworked): three decision-framed
+  // sections — Performance, Inventory health, Sourcing edge — below the hero,
+  // collapsed by default so the panel stays short on mobile. Follows the hub's
+  // existing collapseHead / toggle-collapse idiom.
   function buildLedgerAnalytics(stats, collapsed) {
-    const v = stats.venueSplit || {};
-    const venueBuckets = [
-      { label: 'market', count: (v.market || {}).count || 0 },
-      { label: 'bazaar', count: (v.bazaar || {}).count || 0 },
-    ];
-    if ((v.other || {}).count) venueBuckets.push({ label: 'other', count: v.other.count });
+    const marginBar = buildDistBar([
+      { label: 'loss',   value: bucketCountOf(stats.marginBuckets, 'loss'),   tone: 'bad' },
+      { label: '0–25',   value: bucketCountOf(stats.marginBuckets, '0–25'),   tone: 'warn' },
+      { label: '25–50',  value: bucketCountOf(stats.marginBuckets, '25–50'),  tone: 'neutral' },
+      { label: '50–100', value: bucketCountOf(stats.marginBuckets, '50–100'), tone: 'good' },
+      { label: '100+',   value: bucketCountOf(stats.marginBuckets, '100+'),   tone: 'good' },
+    ]);
+    const AGE_TONES = { '0–3d': 'good', '3–7d': 'good', '7–14d': 'neutral', '14–30d': 'warn', '30d+': 'bad' };
+    const agingBar = buildDistBar(
+      (stats.agingValueBuckets || []).map(b => ({ label: b.label, value: b.value, tone: AGE_TONES[b.label] || 'neutral' })),
+      { fmt: v => fmtCompactMoney(v) }
+    );
+
+    const velocity = stats.velocityPctPerDay == null
+      ? '—'
+      : `${stats.velocityPctPerDay >= 0 ? '+' : ''}${stats.velocityPctPerDay}%/day`;
+    const dead = stats.deadCapital || { amount: 0, pct: 0, oldestDays: 0 };
+    const src = stats.sourcing || { byBonus: [], byItem: [], byType: [] };
+
     return `<div class="rwth-analytics">
       ${collapseHead('More analytics', 'analytics', collapsed)}
       ${collapsed ? '' : `
-      <div class="rwth-mini-grid">
-        ${buildLedgerMiniChart('Margin spread', stats.marginBuckets)}
-        ${buildLedgerMiniChart('Inventory aging', stats.agingBuckets)}
-        ${buildLedgerMiniChart('Venue split', venueBuckets)}
+      <div class="rwth-analytics-section">
+        <div class="rwth-analytics-h">Performance</div>
+        <div class="rwth-analytics-line">velocity <b>${velocity}</b> · fees <b>${stats.feePct || 0}%</b> of gross</div>
+        ${marginBar}
+      </div>
+      <div class="rwth-analytics-section">
+        <div class="rwth-analytics-h">Inventory health</div>
+        <div class="rwth-analytics-line">dead capital <b class="${dead.amount > 0 ? 'rwth-roi-neg' : ''}">${fmtCompactMoney(dead.amount)}</b> · <b>${dead.pct}%</b> of stock · oldest <b>${dead.oldestDays}d</b></div>
+        ${agingBar}
+      </div>
+      <div class="rwth-analytics-section">
+        <div class="rwth-analytics-h">Sourcing edge <span class="rwth-analytics-sub">top by profit</span></div>
+        ${buildSourcingTable('By bonus', src.byBonus)}
+        ${buildSourcingTable('By item', src.byItem)}
+        ${buildSourcingTable('By type', src.byType)}
       </div>`}
     </div>`;
+  }
+
+  // Small helper: pull a bucket's count by label from a [{label,count}] list.
+  function bucketCountOf(buckets, label) {
+    const b = (Array.isArray(buckets) ? buckets : []).find(x => x.label === label);
+    return b ? (b.count || 0) : 0;
   }
 
   // Dashboard for the Ledger tab (#306): headline stat cards + hero profit chart,
@@ -7507,24 +7608,53 @@
       .rwth-proj-readout small { grid-column: 1 / -1; }
 
       .rwth-analytics {
-        display: flex; flex-direction: column; gap: var(--rwth-gap-sm);
+        display: flex; flex-direction: column; gap: var(--rwth-gap-lg);
         border: 1px solid var(--rwth-border-soft); border-radius: var(--rwth-radius-card); padding: var(--rwth-pad-card);
       }
-      .rwth-mini-grid { display: flex; flex-direction: column; gap: var(--rwth-gap-lg); }
-      .rwth-mini { display: flex; flex-direction: column; gap: var(--rwth-gap-xs); }
-      .rwth-mini-title {
-        font: 700 9px var(--rwth-font-mono); text-transform: uppercase;
-        letter-spacing: .5px; color: var(--rwth-muted);
+      .rwth-analytics-section { display: flex; flex-direction: column; gap: var(--rwth-gap-xs); }
+      /* Section titles carry the eye (higher contrast than the old 9px muted), so
+         the structure — not the drawer label — anchors the panel. */
+      .rwth-analytics-h {
+        font: 700 10px var(--rwth-font-mono); text-transform: uppercase;
+        letter-spacing: .5px; color: var(--rwth-text);
       }
-      .rwth-mini-svg { width: 100%; height: 48px; display: block; }
-      .rwth-mini-bar { fill: var(--rwth-secondary-strong); }
-      .rwth-mini-labels { display: flex; }
-      .rwth-mini-cell {
+      .rwth-analytics-sub { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--rwth-muted); }
+      .rwth-analytics-line { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); }
+      .rwth-analytics-line b { color: var(--rwth-text); font-weight: 700; }
+
+      /* Horizontal distribution bar: proportional flex segments, semantic tone,
+         no SVG (so nothing stretches). Zero buckets are simply absent. */
+      .rwth-distbar {
+        display: flex; height: 10px; gap: 1px; border-radius: var(--rwth-radius-ctl); overflow: hidden;
+        background: var(--rwth-fill-faint);
+      }
+      .rwth-seg { min-width: 3px; height: 100%; }
+      .rwth-seg-good    { background: var(--rwth-accent); }
+      .rwth-seg-warn    { background: var(--rwth-warn); }
+      .rwth-seg-bad     { background: var(--rwth-danger); }
+      .rwth-seg-neutral { background: var(--rwth-secondary-strong); }
+      .rwth-distbar-labels { display: flex; }
+      .rwth-distbar-cell {
         flex: 1; display: flex; flex-direction: column; align-items: center;
         gap: 1px; font: 9px var(--rwth-font-mono); color: var(--rwth-muted); text-align: center;
       }
-      .rwth-mini-cell b { font-size: 11px; color: var(--rwth-text); }
-      .rwth-mini-empty { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); font-style: italic; }
+      .rwth-distbar-cell b { font-size: 11px; color: var(--rwth-text); }
+      .rwth-distbar-zero { opacity: .45; }
+      .rwth-distbar-zero b { color: var(--rwth-muted); }
+      .rwth-distbar-empty { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); font-style: italic; }
+
+      /* Sourcing leaderboard: name flexes+ellipses, profit/margin/n are compact
+         right-aligned mono so the three dimensions read as aligned columns. */
+      .rwth-src { display: flex; flex-direction: column; gap: 2px; }
+      .rwth-src-h { font: 700 9px var(--rwth-font-mono); text-transform: uppercase; letter-spacing: .5px; color: var(--rwth-muted); }
+      .rwth-src-row {
+        display: grid; grid-template-columns: 1fr auto auto auto; gap: var(--rwth-gap-sm);
+        align-items: baseline; font: 11px var(--rwth-font-mono); color: var(--rwth-text);
+      }
+      .rwth-src-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rwth-src-profit { font-weight: 700; text-align: right; }
+      .rwth-src-margin { color: var(--rwth-muted); text-align: right; }
+      .rwth-src-n { color: var(--rwth-muted); text-align: right; }
 
       /* Spreadsheet table: one header names the columns, then zebra/hairline rows
          share the same per-status grid track so every figure lines up down its
@@ -11258,6 +11388,9 @@
     rarityDotColor,
     buildLedgerTab,
     buildLedgerDashboard,
+    buildLedgerAnalytics,
+    buildDistBar,
+    buildSourcingTable,
     LedgerStats,
     RowModel,
     askCellV,
