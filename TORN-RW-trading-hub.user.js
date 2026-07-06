@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.187
+// @version      0.3.188
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.187';
+  const SCRIPT_VERSION = '0.3.188';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -6906,7 +6906,10 @@
         bottom: 56px;
         right: 12px;
         width: 360px;
-        height: 480px;
+        /* Cap to the viewport so short screens (landscape phone, Fold cover,
+           split-screen) keep the header — and its full-screen toggle — on-screen
+           instead of clipping it above the top edge. Body already scrolls. */
+        height: min(480px, calc(100vh - 68px));
         /* One below the int max so a co-resident script pinning the true max
            (e.g. Enhanced Chat Buttons' config modal) stacks deterministically. */
         z-index: 2147483646;
