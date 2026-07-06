@@ -7372,7 +7372,7 @@
       .rwth-thead, .rwth-row-head {
         display: grid; align-items: baseline; gap: 6px; padding: 6px 9px;
       }
-      .rwth-cols-held   { grid-template-columns: minmax(0, 1fr) 58px 48px; }
+      .rwth-cols-held   { grid-template-columns: minmax(0, 1fr) 58px 58px 48px; }
       .rwth-cols-listed { grid-template-columns: minmax(0, 1fr) 58px 58px 58px; }
       .rwth-cols-sold   { grid-template-columns: minmax(0, 1fr) 56px 56px 56px 46px; }
       .rwth-cols-all    { grid-template-columns: minmax(0, 1fr) 58px 58px 48px; }

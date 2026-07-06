@@ -479,6 +479,23 @@ test('#28/D5 — BUY/ASK/ROI align on a bare unit under the shared column track'
   assert.doesNotMatch(html, /rwth-cell-v[^>]*>\$\d/);
 });
 
+test('held tab: header + rows share the rwth-cols-held track, and the track has one column per cell', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const held = { ...heldItem, id: 'hgrid', status: 'held', buyPrice: 100000000 };
+  const html = buildLedgerTab({ ledger: { items: [held], statusFilter: 'held' } });
+  // Header + row carry the same grid-track class so figures align down the tab.
+  assert.match(html, /class="rwth-thead rwth-cols-held"/);
+  assert.match(html, /class="rwth-row-head rwth-cols-held"/);
+  // Held renders 4 grid cells (name + buy + ask/"list" + age); the CSS track must
+  // declare 4 columns, else the 4th cell falls into an implicit auto track and the
+  // figures drift out of column. Assert one explicit track per cell.
+  const m = SCRIPT_SOURCE.match(/\.rwth-cols-held\s*\{\s*grid-template-columns:([^;}]*)/);
+  assert.ok(m, 'rwth-cols-held grid-template-columns declared');
+  const trackCount = m[1].trim().split(/\s+(?![^(]*\))/).length;
+  assert.strictEqual(trackCount, 4,
+    'held grid must have 4 tracks (name + buy + list + age)');
+});
+
 test('#28/D5 — .rwth-th header labels lift off the muted tone for contrast', () => {
   // The header is now the only label line; its colour must be the brighter body
   // token, not the near-invisible muted one it carried before.
