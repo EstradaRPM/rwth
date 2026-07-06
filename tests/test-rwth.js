@@ -386,13 +386,18 @@ test('collapsed dash strip stats are aligned label-over-value cells (narrow-widt
     assert.match(c, /<span class="rwth-dash-k">/, 'stat cell carries an aligned label');
     assert.match(c, /<span class="rwth-dash-v">/, 'stat cell carries an aligned value');
   }
-  // Container uses an auto-fit grid so columns reflow/align at narrow width.
+  // Container uses a single-row column-flow grid so a 5th stat (mugs) never wraps to
+  // a second line; the strip is a query container so cell type scales to its width.
   const start = SCRIPT_SOURCE.indexOf('.rwth-dash-stats {');
   assert.notStrictEqual(start, -1, '.rwth-dash-stats rule should exist');
   const block = SCRIPT_SOURCE.slice(start, SCRIPT_SOURCE.indexOf('}', start));
   assert.match(block, /display:\s*grid/, 'stats container should be a grid');
-  assert.match(block, /grid-template-columns:\s*repeat\(auto-fit/,
-    'stats grid should reflow into aligned auto-fit columns');
+  assert.match(block, /grid-auto-flow:\s*column/,
+    'stats grid should flow into a single row so stats never wrap');
+  const stripStart = SCRIPT_SOURCE.indexOf('.rwth-dash-strip {');
+  const stripBlock = SCRIPT_SOURCE.slice(stripStart, SCRIPT_SOURCE.indexOf('}', stripStart));
+  assert.match(stripBlock, /container-type:\s*inline-size/,
+    'strip is a query container so cell type can scale to its width');
 });
 
 test('buildLedgerDashboard opens projection popup with safe period controls', () => {

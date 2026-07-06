@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.186
+// @version      0.3.187
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.186';
+  const SCRIPT_VERSION = '0.3.187';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -7224,23 +7224,28 @@
         display: flex; align-items: center; justify-content: space-between; gap: 8px;
         border: 1px solid var(--rwth-border); border-radius: var(--rwth-radius-card);
         padding: 7px var(--rwth-pad-card); background: var(--rwth-fill-faint);
+        /* Query container so the stat cells below can size their type to the strip's
+           actual width (cqi units) — keeps everything on one row on a Fold cover
+           screen instead of shrinking the font by hand per breakpoint. */
+        container-type: inline-size;
       }
-      /* Responsive stat cells: auto-fit grid columns reflow into aligned rows so
-         labels/values stay in coherent columns when the strip is thin (~340px). */
+      /* Single-row stat cells: force one implicit row (auto-flow column) with equal,
+         freely-shrinking tracks (minmax(0,1fr)) so a 5th stat (mugs) never wraps to a
+         second line. Type below scales with the strip width so tight columns stay legible. */
       .rwth-dash-stats {
-        display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
-        gap: 6px 12px; min-width: 0; flex: 1 1 auto; align-items: end;
+        display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+        gap: 6px 10px; min-width: 0; flex: 1 1 auto; align-items: end;
       }
       .rwth-dash-stat {
         display: flex; flex-direction: column; gap: 1px; min-width: 0;
-        font: 11px var(--rwth-font-mono); color: var(--rwth-muted);
+        font: clamp(9px, 2.9cqi, 11px) var(--rwth-font-mono); color: var(--rwth-muted);
       }
       .rwth-dash-k {
-        font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
-        color: var(--rwth-muted);
+        font-size: clamp(8px, 2.5cqi, 10px); text-transform: uppercase; letter-spacing: .4px;
+        color: var(--rwth-muted); white-space: nowrap;
       }
       .rwth-dash-v { white-space: nowrap; }
-      .rwth-dash-stat b { font: 700 13px var(--rwth-font-mono); color: var(--rwth-text); }
+      .rwth-dash-stat b { font: 700 clamp(10px, 3.4cqi, 13px) var(--rwth-font-mono); color: var(--rwth-text); }
       /* D2 #29: P/L is the reason the page exists — make it the visual lead in the
          strip via heavier label + green (--rwth-accent) when positive. Figure size
          matches the other stats so every value shares the strip's baseline grid. */
