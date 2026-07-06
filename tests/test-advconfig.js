@@ -42,7 +42,7 @@ function assertEq(label, a, b) {
   else { console.error(`  ✗ ${label}  (got ${JSON.stringify(a)}, expected ${JSON.stringify(b)})`); failed++; }
 }
 
-const IDENTITY_KEYS = ['shopName', 'forumThreadTitle', 'tagline'];
+const IDENTITY_KEYS = ['shopName', 'tagline'];
 
 // ── fresh install — neutral placeholders, no specific shop ────────────────────
 
@@ -76,11 +76,9 @@ console.log('\nuser overrides win over defaults');
 {
   const { identity } = AdvConfig.resolve({
     shopName: 'Acme Arms',
-    forumThreadTitle: '[S] Acme // Gear',
     tagline: 'Best in town',
   });
   assertEq('shopName overridden', identity.shopName, 'Acme Arms');
-  assertEq('forumThreadTitle overridden', identity.forumThreadTitle, '[S] Acme // Gear');
   assertEq('tagline overridden', identity.tagline, 'Best in town');
 }
 
@@ -89,9 +87,8 @@ console.log('\nuser overrides win over defaults');
 console.log('\nblank override falls back to default');
 {
   const base = AdvConfig.resolve({}).identity;
-  const { identity } = AdvConfig.resolve({ shopName: '   ', forumThreadTitle: '', tagline: '\t\n' });
+  const { identity } = AdvConfig.resolve({ shopName: '   ', tagline: '\t\n' });
   assertEq('blank shopName falls back', identity.shopName, base.shopName);
-  assertEq('empty forumThreadTitle falls back', identity.forumThreadTitle, base.forumThreadTitle);
   assertEq('whitespace tagline falls back', identity.tagline, base.tagline);
 }
 
@@ -110,7 +107,6 @@ console.log('\npartial override leaves others at default');
   const base = AdvConfig.resolve({}).identity;
   const { identity } = AdvConfig.resolve({ shopName: 'Acme Arms' });
   assertEq('shopName overridden', identity.shopName, 'Acme Arms');
-  assertEq('forumThreadTitle still default', identity.forumThreadTitle, base.forumThreadTitle);
   assertEq('tagline still default', identity.tagline, base.tagline);
 }
 

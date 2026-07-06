@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.196
+// @version      0.3.197
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.196';
+  const SCRIPT_VERSION = '0.3.197';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -82,7 +82,7 @@
 
   // ─── Advertise identity config (#316) ────────────────────────────────────────
   // Shipped neutral defaults for the shop-identity strings every Advertise output
-  // renders — the wordmark, the forum thread title, and the footer tagline. A
+  // renders — the wordmark and the footer tagline. A
   // brand-new install shows these placeholders; the user overrides them from the
   // Advertise tab and the values persist to localStorage like any other setting.
   // AdvConfig.resolve merges these defaults under the persisted user values into
@@ -91,7 +91,6 @@
   // into the same resolved object (parent #315).
   const ADV_IDENTITY_DEFAULTS = {
     shopName: 'Your Shop Name',
-    forumThreadTitle: 'RW Weapons & Armor - Open Shop',
     tagline: 'Quality RW gear, priced to move',
   };
 
@@ -276,7 +275,7 @@
   };
 
   const AdvConfig = {
-    // (settings) -> { identity: { shopName, forumThreadTitle, tagline },
+    // (settings) -> { identity: { shopName, tagline },
     //                 theme:    { themeKey, <every ADV_THEME_TOKENS colour> },
     //                 copy:     { subBanner, intro, alsoRotating, footerTagline },
     //                 sections: { transactions },
@@ -505,7 +504,6 @@
       // #316 — shop identity, edited in the Advertise tab. Blank -> AdvConfig
       // falls back to the shipped neutral placeholder.
       shopName: '',
-      forumThreadTitle: '',
       tagline: '',
       // #317 — selected post-palette preset key. Blank/unknown -> AdvConfig
       // resolves to the neutral default theme.
@@ -638,6 +636,15 @@
     // stored value would only sit dead in localStorage. Cleared once on upgrade.
     if (Object.prototype.hasOwnProperty.call(MEM.settings, 'markupNotice')) {
       delete MEM.settings.markupNotice;
+      Store.set('rwth_settings', MEM.settings);
+    }
+
+    // Drop the retired forum-thread-title identity field. It was a copy-only
+    // scratchpad that no generator ever read (the thread title lives in Torn's
+    // create-thread box, and shopName already carries shop identity), so a stored
+    // value would only sit dead in localStorage. Cleared once on upgrade.
+    if (Object.prototype.hasOwnProperty.call(MEM.settings, 'forumThreadTitle')) {
+      delete MEM.settings.forumThreadTitle;
       Store.set('rwth_settings', MEM.settings);
     }
 
@@ -4734,17 +4741,6 @@
                  autocomplete="off" spellcheck="false">
         </label>
         <label class="rwth-field">
-          <span class="rwth-field-label">Your forum thread title</span>
-          <input class="rwth-field-input" id="rwth-adv-forum-title" type="text" data-adv-identity="forumThreadTitle"
-                 value="${escapeAttr(settings.forumThreadTitle)}"
-                 placeholder="${escapeAttr(ADV_IDENTITY_DEFAULTS.forumThreadTitle)}"
-                 autocomplete="off" spellcheck="false">
-        </label>
-        <div class="rwth-form-actions">
-          <button class="rwth-btn-sm" type="button" data-action="copy-output"
-                  data-copy-target="rwth-adv-forum-title">Copy thread title</button>
-        </div>
-        <label class="rwth-field">
           <span class="rwth-field-label">Your shop tagline</span>
           <input class="rwth-field-input" type="text" data-adv-identity="tagline"
                  value="${escapeAttr(settings.tagline)}"
@@ -4859,11 +4855,8 @@
     let outputsBody = '';
     if (!fold.advOutputs) {
       // #325 — quick-copy text strip on top: the trade-chat blurb, a non-visual
-      // output with no rendered "look", sat above the surface switcher. The forum
-      // thread title used to live here too, but it is a verbatim echo of the
-      // "Your forum thread title" identity field, so it is copied at source from
-      // Brand & look instead. The chat blurb stays an editable textarea for
-      // last-second wording tweaks before copy.
+      // output with no rendered "look", sat above the surface switcher. The chat
+      // blurb stays an editable textarea for last-second wording tweaks before copy.
       const textStrip = `
         ${buildOutputBox('Trade-chat blurb', 'rwth-out-chat',
                          AdvertiseGenerator.toChat(selectedItems, settings), true, 3)}`;

@@ -1112,20 +1112,19 @@ test('buildAdvertiseTab renders the Recent Transactions editor', () => {
   assert.match(html, /data-action="remove-tx"/);
 });
 
-// #316/#325 — the forum title is user-configured shop identity, copied at source
-// from the Brand & look field rather than echoed as a generated output; the chat
-// blurb is the one quick-copy text box in the Copy-to-Torn strip.
-test('buildAdvertiseTab copies the forum thread title at source and renders the chat box', () => {
+// The forum thread title field was retired — it was a copy-only scratchpad no
+// generator read (the title lives in Torn's create-thread box, and shopName
+// carries shop identity). The chat blurb is the one quick-copy text box in the
+// Copy-to-Torn strip.
+test('buildAdvertiseTab drops the retired forum thread title field and renders the chat box', () => {
   const { buildAdvertiseTab } = globalThis.__RwthPure;
   const html = buildAdvertiseTab({
     advertise: { selectedIds: null, transactions: [] },
     ledger: { items: [] },
     settings: {},
   });
-  // The forum thread title is copied from its identity input, not a separate
-  // generated "Forum title" output box.
-  assert.match(html, /data-copy-target="rwth-adv-forum-title"/);
-  assert.match(html, /id="rwth-adv-forum-title"[^>]*data-adv-identity="forumThreadTitle"/);
+  assert.doesNotMatch(html, /forumThreadTitle/);
+  assert.doesNotMatch(html, /rwth-adv-forum-title/);
   assert.doesNotMatch(html, /data-copy-target="rwth-out-title"/);
   assert.match(html, /data-copy-target="rwth-out-chat"/);
 });
