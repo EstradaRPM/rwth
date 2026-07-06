@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.185
+// @version      0.3.186
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.185';
+  const SCRIPT_VERSION = '0.3.186';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -3206,12 +3206,19 @@
     // thin (e.g. a Fold front screen ~340px wide).
     const cell = (k, v, extra = '') =>
       `<span class="rwth-dash-stat${extra}"><span class="rwth-dash-k">${k}</span><span class="rwth-dash-v">${v}</span></span>`;
+    // Strip layout: P/L · ROI · Stock · Sell (· mugs when nonzero). P/L (banked)
+    // and Stock (capital tied up in unsold stock) show always; ROI and Sell are
+    // sold-derived, so they appear only once a realized sale exists to compute
+    // them from — the same soldCount gate the retired win cell used. All four
+    // reuse LedgerStats fields verbatim; no figure is recomputed here.
     const stripBits = [
       cell('P/L', `<b class="${cls(s.realized)}">${csigned(s.realized)}</b>`,
         ' rwth-dash-lead' + (s.realized >= 0 ? ' rwth-dash-pos' : '')),
-      cell('Cap', `<b>${fmtCompactMoney(s.capitalDeployed)}</b>`),
     ];
-    if (s.soldCount) stripBits.push(cell('win', `<b>${s.winRate}%</b>`));
+    if (s.soldCount) stripBits.push(cell('ROI',
+      `<b class="${cls(s.realizedRoiPct)}">${s.realizedRoiPct >= 0 ? '+' : ''}${s.realizedRoiPct}%</b>`));
+    stripBits.push(cell('Stock', `<b>${fmtCompactMoney(s.capitalDeployed)}</b>`));
+    if (s.soldCount) stripBits.push(cell('Sell', `<b>${s.avgDaysToClear}d</b>`));
     if (s.mugLossTotal > 0) stripBits.push(cell('mugs', `<b class="rwth-roi-neg">${fmtCompactMoney(-s.mugLossTotal)}</b>`));
 
     return `<div class="rwth-dash">
