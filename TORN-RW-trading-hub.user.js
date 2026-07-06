@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.180
+// @version      0.3.181
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.180';
+  const SCRIPT_VERSION = '0.3.181';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1749,6 +1749,13 @@
     if (abs >= 1_000) return `${sign}$${round1(abs / 1_000)}k`;
     return `${sign}$${Math.round(abs).toLocaleString('en-US')}`;
   }
+  // #28/D5 — same compact money without the repeated `$`, so the BUY/ASK/NET
+  // figure cells align on a bare numeric unit down each right-aligned track
+  // (the column header already carries the label). Keeps the k/m/b suffix and
+  // the leading sign; only the currency glyph is dropped.
+  function fmtCompactNum(n) {
+    return fmtCompactMoney(n).replace('$', '');
+  }
   function fmtDate(ts) {
     if (!ts || !Number.isFinite(ts)) return '—';
     return new Date(ts).toISOString().slice(0, 10);
@@ -1940,12 +1947,12 @@
       // the 58px track (and reads like BUY), and carry the raw digits on data-raw
       // so the render layer can swap them in on focus for exact editing.
       const raw = m.ask == null ? '' : m.ask;
-      const disp = m.ask == null ? '' : fmtCompactMoney(m.ask);
+      const disp = m.ask == null ? '' : fmtCompactNum(m.ask);
       return `<span class="rwth-cell-v rwth-cell-ctl">`
         + `<input class="rwth-ask-edit" type="text" inputmode="numeric" data-ask-edit data-row-ctl`
         + ` data-id="${escapeAttr(id)}" data-raw="${escapeAttr(raw)}" value="${escapeAttr(disp)}" aria-label="ask price"></span>`;
     }
-    return valCell(m.ask == null ? null : fmtCompactMoney(m.ask));
+    return valCell(m.ask == null ? null : fmtCompactNum(m.ask));
   }
 
   // The ROI cell, rendered so hope never reads like banked money: a projected
@@ -1974,9 +1981,9 @@
     const cols = COLUMN_SETS[status] || COLUMN_SETS.all;
     return cols.map(col => {
       switch (col) {
-        case 'buy': return valCell(m.buy == null ? null : fmtCompactMoney(m.buy));
+        case 'buy': return valCell(m.buy == null ? null : fmtCompactNum(m.buy));
         case 'ask': return askCellV(m, id);
-        case 'net': return valCell(m.net == null ? null : fmtCompactMoney(m.net));
+        case 'net': return valCell(m.net == null ? null : fmtCompactNum(m.net));
         case 'roi': return roiCellV(m);
         case 'age': return valCell(m.age == null ? null : m.age + 'd', ageCls);
         default:    return valCell(null);
@@ -5072,7 +5079,7 @@
       // so the stored ask still equals data-raw — reset the display to its
       // compact form rather than leaving the raw digits showing.
       const raw = el.dataset.raw;
-      el.value = raw ? fmtCompactMoney(Number(raw)) : '';
+      el.value = raw ? fmtCompactNum(Number(raw)) : '';
     }
   }
 
@@ -7343,9 +7350,11 @@
         position: sticky; top: 0; z-index: 1; padding-top: 4px; padding-bottom: 4px;
         background: var(--rwth-bg); border-bottom: 1px solid var(--rwth-border-strong);
       }
+      /* #28/D5 — the header is now the only label line, so lift its contrast off
+         the near-invisible muted tone up to body-text brightness. */
       .rwth-th {
         font: 700 9px var(--rwth-font-mono); text-transform: uppercase;
-        letter-spacing: .4px; color: var(--rwth-muted); text-align: right;
+        letter-spacing: .4px; color: var(--rwth-text); text-align: right;
       }
       .rwth-th-name { text-align: left; }
       .rwth-row-head { cursor: pointer; }
@@ -11052,6 +11061,7 @@
     RowModel,
     askCellV,
     colLabel,
+    fmtCompactNum,
     LedgerSort,
     ChartGeom,
     buildAdvertiseTab,

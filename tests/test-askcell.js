@@ -1,6 +1,7 @@
 // node test-askcell.js
 // #21/1 — binding test for askCellV, the inline ASK cell. A listed row must
-// render its ask as COMPACT money ($175m) at rest so a 9-digit price never clips
+// render its ask as a COMPACT bare unit (175m — #28/D5 drops the repeated `$`
+// so BUY/ASK/NET align on one unit) at rest so a 9-digit price never clips
 // the fixed 58px track, while carrying the RAW digits on data-raw so the render
 // layer can swap them in on focus for exact editing. Loads the shipped .user.js
 // directly (ADR-0002 seam) so the real code is exercised.
@@ -45,7 +46,8 @@ console.log('\nlisted ask cell');
     NOW);
   const html = askCellV(m, 'x1');
   assert('is an ask-edit input', /data-ask-edit/.test(html));
-  assert('display value is compact money ($175m)', /value="\$175m"/.test(html));
+  assert('display value is compact bare unit (175m, no $)', /value="175m"/.test(html));
+  assert('no repeated $ prefix in the ask display', !/value="\$/.test(html));
   assert('raw digits ride on data-raw', /data-raw="175000000"/.test(html));
   assert('does NOT show raw digits in the visible value', !/value="175000000"/.test(html));
 }
@@ -57,7 +59,7 @@ console.log('\nhigh ask never clips at rest');
     { status: 'listed', buyPrice: 500_000_000, listPrice: 999_000_000, buyTimestamp: NOW - DAY },
     NOW);
   const html = askCellV(m, 'x2');
-  assert('compact display ($999m)', /value="\$999m"/.test(html));
+  assert('compact display (999m)', /value="999m"/.test(html));
   assert('raw on data-raw', /data-raw="999000000"/.test(html));
 }
 
@@ -92,7 +94,7 @@ console.log('\nsold ask cell (plain)');
       buyTimestamp: NOW - 5 * DAY, soldTimestamp: NOW },
     NOW);
   const html = askCellV(m, 'x5');
-  assert('compact value ($175m)', /\$175m/.test(html));
+  assert('compact value (175m, no $)', /175m/.test(html) && !/\$175m/.test(html));
   assert('not an editable input', !/data-ask-edit/.test(html));
 }
 

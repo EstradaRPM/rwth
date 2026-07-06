@@ -409,6 +409,33 @@ test('buildLedgerTab shows ROI in a sold row collapsed line', () => {
   assert.match(html, /\+\$300,000/);
 });
 
+test('#28/D5 — BUY/ASK/ROI align on a bare unit under the shared column track', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const listed = { ...heldItem, id: 'd5', status: 'listed',
+    buyPrice: 100000000, listPrice: 175000000 };
+  const html = buildLedgerTab({ ledger: { items: [listed], statusFilter: 'listed' } });
+  // Header labels present, and header + row share the same rwth-cols-* grid track
+  // so the three figure columns line up down the tab.
+  assert.match(html, /class="rwth-thead rwth-cols-listed"/);
+  assert.match(html, /class="rwth-row-head rwth-cols-listed"/);
+  assert.match(html, /<span class="rwth-th">buy<\/span>/);
+  assert.match(html, /<span class="rwth-th">ask<\/span>/);
+  assert.match(html, /<span class="rwth-th">roi<\/span>/);
+  // BUY renders as a bare compact unit (no repeated $), and ASK's inline input
+  // shows the same bare unit — the two money columns share one alignment unit.
+  assert.match(html, /class="rwth-cell-v">100m<\/span>/);
+  assert.match(html, /value="175m"/);
+  // No $-prefixed compact figure leaks into the aligned figure cells.
+  assert.doesNotMatch(html, /rwth-cell-v[^>]*>\$\d/);
+});
+
+test('#28/D5 — .rwth-th header labels lift off the muted tone for contrast', () => {
+  // The header is now the only label line; its colour must be the brighter body
+  // token, not the near-invisible muted one it carried before.
+  assert.match(SCRIPT_SOURCE,
+    /\.rwth-th \{[^}]*color: var\(--rwth-text\)/);
+});
+
 test('buildLedgerTab expanded row exposes mark-listed / edit / delete actions', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
   const html = buildLedgerTab({ ledger: { items: [heldItem], statusFilter: 'all', expandedId: 'a1' } });
