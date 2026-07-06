@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.191
+// @version      0.3.192
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.191';
+  const SCRIPT_VERSION = '0.3.192';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -419,9 +419,13 @@
       open: false,
       maximized: false,
       activeTab: 'ledger', // 'ledger' | 'advertise' | 'settings'
-      // #341 — ledger sort id, persisted under rwth_sort. Newest is the default
-      // so the first open after upgrade does not surprise-reorder the list.
-      sort: 'newest',      // 'newest' | 'stalest' | 'bestRoi' | 'biggestPl'
+      // #341 — ledger sort AXIS, persisted under rwth_sort. Date-descending is the
+      // default so the first open after upgrade does not surprise-reorder the list.
+      sort: 'date',        // axis: 'date' | 'age' | 'roi' | 'pl'
+      // Direction the axis sorts, persisted under rwth_sort_dir. 'desc' = high→low
+      // (newest / most-aged / best / biggest); 'asc' = low→high. Null keys always
+      // sink to the bottom regardless, so dead stock never crowds either end.
+      sortDir: 'desc',     // 'desc' | 'asc'
       // #361 — selected period for the projection popup/chart display.
       projectionPeriod: 'month', // 'day' | 'week' | 'month' | 'quarter' | 'year'
       projectionPanelOpen: false,
@@ -665,10 +669,23 @@
       MEM.ui.collapsed = { ...MEM.ui.collapsed, ...collapsed };
     }
 
-    // #341 — restore the persisted ledger sort, ignoring any stale/unknown id so
-    // a renamed sort falls back to the default rather than rendering nothing.
+    // #341 — restore the persisted ledger sort axis + direction. A current axis id
+    // is used as-is; a retired direction-baked id (newest/oldest/stalest/…) migrates
+    // once to its axis+direction and is rewritten so this runs a single time; any
+    // other unknown id falls back to the default rather than rendering nothing.
     const sort = Store.get('rwth_sort');
-    if (typeof sort === 'string' && SORT_IDS.includes(sort)) MEM.ui.sort = sort;
+    if (typeof sort === 'string') {
+      if (SORT_IDS.includes(sort)) {
+        MEM.ui.sort = sort;
+      } else if (LEGACY_SORT[sort]) {
+        MEM.ui.sort = LEGACY_SORT[sort].axis;
+        MEM.ui.sortDir = LEGACY_SORT[sort].dir;
+        Store.set('rwth_sort', MEM.ui.sort);
+        Store.set('rwth_sort_dir', MEM.ui.sortDir);
+      }
+    }
+    const sortDir = Store.get('rwth_sort_dir');
+    if (typeof sortDir === 'string' && SORT_DIRS.includes(sortDir)) MEM.ui.sortDir = sortDir;
 
     const projectionPeriod = Store.get('rwth_projection_period');
     if (typeof projectionPeriod === 'string' && PROJECTION_PERIOD_IDS.includes(projectionPeriod)) {
@@ -1854,23 +1871,37 @@
   };
 
   // ─── LedgerSort (pure, ADR-0002) ────────────────────────────────────────────
-  // #341 — a comparator map over RowModel output, one comparator per sort id the
-  // ledger bar offers. Each returns the usual <0 / 0 / >0; a null key always
-  // sinks to the BOTTOM regardless of direction, so dead stock (held rows have
-  // no ROI/P-L) and stampless rows never crowd the top. Ties return 0 and lean
-  // on Array.prototype.sort being stable (Node 11+, all live browsers), so equal
-  // rows keep their incoming (filtered) order — deterministic without a manual
-  // index. bestRoi reads roiPct straight off the model, which RowModel already
-  // computes as PROJECTED for listed and REALIZED for sold (one scale, mixed);
-  // biggestPl mixes realized P/L (net-buy, sold) with projected (ask-buy, listed).
+  // #341 — the ledger bar sorts on one AXIS in one DIRECTION. The axis is a neutral
+  // key extractor over RowModel output; the direction (desc/asc) is a flip applied
+  // by ledgerComparator, so one control set covers "newest ↔ oldest", "best ↔ worst"
+  // ROI, etc. without doubling the dropdown. A null key ALWAYS sinks to the bottom
+  // regardless of direction, so dead stock (held rows have no ROI/P-L) and stampless
+  // rows never crowd either end. Ties return 0 and lean on Array.prototype.sort being
+  // stable (Node 11+, all live browsers), so equal rows keep their incoming (filtered)
+  // order — deterministic without a manual index. The `roi` axis reads roiPct straight
+  // off the model (PROJECTED for listed, REALIZED for sold — one mixed scale); `pl`
+  // mixes realized P/L (net-buy, sold) with projected (ask-buy, listed).
   const SORT_OPTIONS = [
-    ['newest',    'Newest'],
-    ['stalest',   'Most Aged'],
-    ['bestRoi',   'Best ROI%'],
-    ['biggestPl', 'Biggest P/L'],
+    ['date', 'Date'],
+    ['age',  'Age'],
+    ['roi',  'ROI%'],
+    ['pl',   'P/L'],
   ];
   const SORT_IDS = SORT_OPTIONS.map(o => o[0]);
-  const DEFAULT_SORT = 'newest';
+  const DEFAULT_SORT = 'date';
+  const SORT_DIRS = ['desc', 'asc'];
+  const DEFAULT_SORT_DIR = 'desc';
+
+  // One-time migration for installs that persisted the retired direction-baked sort
+  // ids (before the axis + direction split). Each maps to the axis + direction that
+  // reproduces the old order; hydrate() consults this when rwth_sort is an old id.
+  const LEGACY_SORT = {
+    newest:    { axis: 'date', dir: 'desc' },
+    oldest:    { axis: 'date', dir: 'asc'  },
+    stalest:   { axis: 'age',  dir: 'desc' },
+    bestRoi:   { axis: 'roi',  dir: 'desc' },
+    biggestPl: { axis: 'pl',   dir: 'desc' },
+  };
 
   // Realized P/L for a sold row (net-buy), projected P/L for a listed row
   // (ask-buy); null for held or any row missing the leg it needs.
@@ -1882,7 +1913,7 @@
   }
 
   // dir = -1 descending, +1 ascending. Null keys always sort last (after both
-  // directions), so the "sink to the bottom" rule holds for stalest as well.
+  // directions), so the "sink to the bottom" rule holds either way.
   function cmpNullsLast(av, bv, dir) {
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
@@ -1900,12 +1931,23 @@
     return m && m.agingLevel != null ? m.age : null;
   }
 
-  const LedgerSort = {
-    newest:    (a, b) => cmpNullsLast(a.buyTimestamp, b.buyTimestamp, -1),
-    stalest:   (a, b) => cmpNullsLast(rowStale(a),    rowStale(b),    -1),
-    bestRoi:   (a, b) => cmpNullsLast(a.roiPct,       b.roiPct,       -1),
-    biggestPl: (a, b) => cmpNullsLast(rowPl(a),       rowPl(b),       -1),
+  // Axis → key extractor over a RowModel projection. Every extractor may return
+  // null (missing leg / banked / stampless); cmpNullsLast sinks those either way.
+  const SORT_KEYS = {
+    date: m => (m ? m.buyTimestamp : null),
+    age:  m => rowStale(m),
+    roi:  m => (m ? m.roiPct : null),
+    pl:   m => rowPl(m),
   };
+
+  // Build the comparator for an (axis, direction) pair. dir 'asc' sorts low→high;
+  // anything else (incl. the 'desc' default) sorts high→low. An unknown axis falls
+  // back to the default so a stale persisted id can never yield an undefined key.
+  function ledgerComparator(axis, dir) {
+    const key = SORT_KEYS[axis] || SORT_KEYS[DEFAULT_SORT];
+    const d = dir === 'asc' ? 1 : -1;
+    return (a, b) => cmpNullsLast(key(a), key(b), d);
+  }
 
   // Spreadsheet column model. Each status shows only the legs it actually has,
   // so dead em-dash columns never crowd the row and the freed width goes to live
@@ -3290,19 +3332,30 @@
     // comparators read the same projection the rows render; Array.sort is stable,
     // so equal-key rows keep filtered order. Unknown ids fall back to the default.
     const sortId = SORT_IDS.includes(mem && mem.ui && mem.ui.sort) ? mem.ui.sort : DEFAULT_SORT;
+    const sortDir = SORT_DIRS.includes(mem && mem.ui && mem.ui.sortDir) ? mem.ui.sortDir : DEFAULT_SORT_DIR;
+    const cmp = ledgerComparator(sortId, sortDir);
     const sorted = filtered
       .map(i => ({ i, m: RowModel.forItem(i, now) }))
-      .sort((a, b) => LedgerSort[sortId](a.m, b.m))
+      .sort((a, b) => cmp(a.m, b.m))
       .map(d => d.i);
     const list = sorted.length
       ? sorted.map(i => buildLedgerRow(i, i.id === L.expandedId, rowCtx)).join('')
       : `<div class="rwth-placeholder">No ${filter === 'all' ? '' : filter + ' '}items yet.</div>`;
 
+    // Axis dropdown + a compact direction toggle. The toggle carries the direction
+    // it would switch TO (data-sort-dir), so the click handler needs no state read;
+    // the arrow + label always describe the CURRENT direction (honest either way).
+    const isDesc = sortDir !== 'asc';
+    const dirTitle = isDesc ? 'High → low (click for low → high)' : 'Low → high (click for high → low)';
     const sortSel = `<label class="rwth-sort"><span class="rwth-sort-k">sort</span>`
-      + `<select class="rwth-sort-select" data-sort-select aria-label="sort ledger">`
+      + `<select class="rwth-sort-select" data-sort-select aria-label="sort ledger by">`
       + SORT_OPTIONS.map(([id, label]) =>
           `<option value="${id}"${id === sortId ? ' selected' : ''}>${label}</option>`).join('')
-      + `</select></label>`;
+      + `</select>`
+      + `<button type="button" class="rwth-sort-dir" data-action="toggle-sort-dir"`
+      + ` data-sort-dir="${isDesc ? 'asc' : 'desc'}" aria-label="${escapeAttr(dirTitle)}"`
+      + ` title="${escapeAttr(dirTitle)}">${isDesc ? '↓' : '↑'}</button>`
+      + `</label>`;
 
     const scanning = !!L.scanning;
     const err = mem && mem.fetchError;
@@ -4895,6 +4948,7 @@
         case 'close-img':     setState({ advertise: { ...MEM.advertise, imgEditId: null } }); break;
         case 'toggle-setimg': toggleSettingsImg(actionEl.dataset.key); break;
         case 'close-setimg':  toggleSettingsImg(null); break;
+        case 'toggle-sort-dir':     toggleSortDir(actionEl.dataset.sortDir); break;
         case 'toggle-collapse':     toggleCollapse(actionEl.dataset.collapse); break;
       }
     });
@@ -5361,6 +5415,16 @@
     if (!SORT_IDS.includes(next) || next === MEM.ui.sort) return;
     Store.set('rwth_sort', next);
     setState({ ui: { ...MEM.ui, sort: next } });
+  }
+
+  // #341 — flip the ledger sort direction. `next` is the direction to switch to
+  // (the toggle button carries it in data-sort-dir); validate, persist, re-render.
+  // Unknown/absent values fall back to the default so a bad attr can't wedge it.
+  function toggleSortDir(next) {
+    const dir = SORT_DIRS.includes(next) ? next : DEFAULT_SORT_DIR;
+    if (dir === MEM.ui.sortDir) return;
+    Store.set('rwth_sort_dir', dir);
+    setState({ ui: { ...MEM.ui, sortDir: dir } });
   }
 
   // #361 — Persist only the selected projection period. Opening/closing the
@@ -7209,8 +7273,19 @@
         background: var(--rwth-fill-faint); border: 1px solid var(--rwth-border);
         border-radius: var(--rwth-radius-ctl); color: var(--rwth-text); cursor: pointer;
         padding: 4px 6px; font: 600 10px var(--rwth-font-mono);
-        max-width: 126px;
+        max-width: 110px;
       }
+      /* Direction flip: a compact square glued to the select. Fixed-width so the
+         ↓/↑ swap never nudges the row, ≥24px tap target, arrow centred. Shares the
+         select's chrome so the pair reads as one control on any width. */
+      .rwth-sort-dir {
+        flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+        min-width: 24px; height: 24px; padding: 0;
+        background: var(--rwth-fill-faint); border: 1px solid var(--rwth-border);
+        border-radius: var(--rwth-radius-ctl); color: var(--rwth-text); cursor: pointer;
+        font: 700 12px var(--rwth-font-mono); line-height: 1;
+      }
+      .rwth-sort-dir:hover { color: var(--rwth-accent); border-color: var(--rwth-accent); }
 
       @container (min-width: 520px) {
         .rwth-ledger-bar {
@@ -11156,7 +11231,9 @@
     askCellV,
     colLabel,
     fmtCompactNum,
-    LedgerSort,
+    ledgerComparator,
+    SORT_KEYS,
+    SORT_OPTIONS,
     ChartGeom,
     buildAdvertiseTab,
     buildSettingsTab,

@@ -272,14 +272,15 @@ test('buildLedgerTab keeps status filters separate from ledger actions', () => {
   const listed = { ...heldItem, id: 'c3', status: 'listed', listPrice: 118000000 };
   const html = buildLedgerTab({
     ledger: { items: [heldItem, listed, soldItem], statusFilter: 'all' },
-    ui: { sort: 'bestRoi' },
+    ui: { sort: 'roi' },
   });
 
   assert.match(html, /class="rwth-ledger-status"/);
   assert.match(html, /aria-label="Ledger status filters"/);
   assert.match(html, /data-filter="all" aria-pressed="true"/);
   assert.match(html, /<span class="rwth-filter-count">\(3\)<\/span><\/span><\/button>/);
-  assert.match(html, /data-sort-select aria-label="sort ledger"/);
+  assert.match(html, /data-sort-select aria-label="sort ledger by"/);
+  assert.match(html, /data-action="toggle-sort-dir"/);
   assert.match(html, /data-action="refresh"/);
   assert.match(html, /data-action="toggle-scan-settings"/);
 });
@@ -291,7 +292,7 @@ test('buildLedgerTab folds status money into chip subtitles, drops the summary b
   const listed = { ...heldItem, id: 'c3', status: 'listed', listPrice: 118000000 };
   const html = buildLedgerTab({
     ledger: { items: [heldItem, listed, soldItem], statusFilter: 'all' },
-    ui: { sort: 'bestRoi' },
+    ui: { sort: 'roi' },
   });
 
   // No standalone summary band anymore.
