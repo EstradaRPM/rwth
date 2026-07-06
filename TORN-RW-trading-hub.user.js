@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.178
+// @version      0.3.179
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.178';
+  const SCRIPT_VERSION = '0.3.179';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -2005,10 +2005,11 @@
     const status = COLUMN_SETS[c.colStatus] ? c.colStatus : 'all';
     // One-line grid row: a truncating name cell (name + bonus + rarity, ellipsed
     // when narrow but kept in the markup) then the status-driven figure cells.
+    // The rarity dot sits in a flex wrapper alongside — not inside — the
+    // truncating name span, so the ellipsis only ever clips real name text (#26).
     const head = `<div class="rwth-row-head rwth-cols-${status}" data-row-toggle="${item.id}">
-        <span class="rwth-row-name">${escapeAttr(item.itemName)}${
-          bonus ? ` <span class="rwth-row-bonus">${escapeAttr(bonus)}</span>` : ''} ${
-          rarityChip(item.rarity)}</span>
+        <span class="rwth-row-name-wrap">${rarityChip(item.rarity)}<span class="rwth-row-name">${escapeAttr(item.itemName)}${
+          bonus ? ` <span class="rwth-row-bonus">${escapeAttr(bonus)}</span>` : ''}</span></span>
         ${rowCells(model, item.id, status)}
       </div>`;
     if (!expanded) return `<div class="rwth-row">${head}</div>`;
@@ -2189,9 +2190,23 @@
       `<option value="${r}"${r === sel ? ' selected' : ''}>${
         r ? r[0].toUpperCase() + r.slice(1) : '—'}</option>`).join('');
   }
+  // Rarity → dot colour, drawn from the shared --rwth-rarity-* palette. Pure and
+  // exported on __RwthPure so the mapping is testable in isolation (ADR-0002).
+  const RARITY_COLORS = {
+    white:  '#d6d6d6',
+    yellow: '#ffd93b',
+    orange: '#ff9f1c',
+    red:    '#ff5d5d',
+  };
+  function rarityDotColor(rarity) {
+    return RARITY_COLORS[rarity] || '';
+  }
+  // A small coloured dot standing in for the old worded pill: same rarity signal,
+  // a fraction of the width, and no truncation artifact inside a narrow name cell.
   function rarityChip(rarity) {
-    if (!rarity) return '';
-    return `<span class="rwth-rarity rwth-rarity-${escapeAttr(rarity)}">${escapeAttr(rarity)}</span>`;
+    if (!rarity || !RARITY_COLORS[rarity]) return '';
+    const r = escapeAttr(rarity);
+    return `<span class="rwth-rarity-dot rwth-rarity-dot--${r}" title="${r}" aria-label="${r}"></span>`;
   }
 
   // One checklist entry for a detected auction win. Every field — name, type,
@@ -6807,6 +6822,10 @@
         --rwth-muted: #8aa;                  /* secondary / muted text      */
         --rwth-danger: #ff5d5d;              /* errors / destructive        */
         --rwth-warn: #ffb347;                /* aging warning / amber       */
+        --rwth-rarity-white:  #d6d6d6;       /* rarity dot palette (#26)    */
+        --rwth-rarity-yellow: #ffd93b;
+        --rwth-rarity-orange: #ff9f1c;
+        --rwth-rarity-red:    #ff5d5d;
         /* Chrome borders & fills, faint → bright. Retuned from cyan-alpha toward a
            near-neutral cool grey so content leads and borders recede; cyan is
            reserved for text-level secondary (labels/links) and the secondary
@@ -7085,14 +7104,16 @@
         font: 10px/1.4 var(--rwth-font-mono); padding: 5px;
         white-space: pre; overflow: auto;
       }
-      .rwth-rarity {
-        font: 700 9px var(--rwth-font-mono); text-transform: uppercase;
-        color: var(--rwth-bg); padding: 1px 5px; border-radius: var(--rwth-radius-ctl);
+      /* Rarity dot (#26): a small colour chip replacing the old worded pill. */
+      .rwth-rarity-dot {
+        flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%;
+        display: inline-block; vertical-align: middle;
+        box-shadow: inset 0 0 0 1px #0006;
       }
-      .rwth-rarity-white  { background: #d6d6d6; }
-      .rwth-rarity-yellow { background: #ffd93b; }
-      .rwth-rarity-orange { background: #ff9f1c; }
-      .rwth-rarity-red    { background: var(--rwth-danger); }
+      .rwth-rarity-dot--white  { background: var(--rwth-rarity-white); }
+      .rwth-rarity-dot--yellow { background: var(--rwth-rarity-yellow); }
+      .rwth-rarity-dot--orange { background: var(--rwth-rarity-orange); }
+      .rwth-rarity-dot--red    { background: var(--rwth-rarity-red); }
       .rwth-filters { display: flex; gap: 4px; flex-wrap: wrap; }
       .rwth-filter {
         background: none; border: 1px solid var(--rwth-border); border-radius: var(--rwth-radius-ctl);
@@ -7332,6 +7353,8 @@
       .rwth-th-name { text-align: left; }
       .rwth-row-head { cursor: pointer; }
       .rwth-row-head:hover { background: var(--rwth-fill-hover); }
+      /* First grid cell: the flex-none rarity dot next to the truncating name. */
+      .rwth-row-name-wrap { display: flex; align-items: center; gap: 6px; min-width: 0; }
       .rwth-row-name {
         min-width: 0; font: 600 12px var(--rwth-font-ui); color: var(--rwth-text);
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -11025,6 +11048,7 @@
   // ─── Test seam (ADR-0002) ────────────────────────────────────────────────────
   // Pure functions exposed for the Node test runner. More are added in later slices.
   globalThis.__RwthPure = {
+    rarityDotColor,
     buildLedgerTab,
     buildLedgerDashboard,
     LedgerStats,

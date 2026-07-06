@@ -238,6 +238,28 @@ test('buildLedgerTab renders a row per item with name, bonus and price', () => {
   assert.match(html, /data-row-toggle="a1"/);
 });
 
+test('rarityDotColor maps each rarity to its palette colour', () => {
+  const { rarityDotColor } = globalThis.__RwthPure;
+  assert.strictEqual(rarityDotColor('white'), '#d6d6d6');
+  assert.strictEqual(rarityDotColor('yellow'), '#ffd93b');
+  assert.strictEqual(rarityDotColor('orange'), '#ff9f1c');
+  assert.strictEqual(rarityDotColor('red'), '#ff5d5d');
+  assert.strictEqual(rarityDotColor(''), '');
+  assert.strictEqual(rarityDotColor('bogus'), '');
+});
+
+test('ledger row shows a rarity dot, not a worded pill', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const yellowItem = { ...heldItem, id: 'y1', rarity: 'yellow' };
+  const html = buildLedgerTab({ ledger: { items: [yellowItem], statusFilter: 'all' } });
+  // A dot element with the correct rarity modifier class, before the name span.
+  assert.match(html, /class="rwth-rarity-dot rwth-rarity-dot--yellow"/);
+  assert.match(html, /rwth-rarity-dot--yellow[^>]*><\/span><span class="rwth-row-name"/);
+  // No worded rarity text anywhere in the markup.
+  assert.doesNotMatch(html, /YELLOW|ORANGE|RED|WHITE/);
+  assert.doesNotMatch(html, />yellow</);
+});
+
 test('buildLedgerTab status filter narrows the visible rows', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
   const html = buildLedgerTab({ ledger: { items: [heldItem, soldItem], statusFilter: 'sold' } });
