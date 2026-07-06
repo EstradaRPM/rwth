@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.193
+// @version      0.3.194
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.193';
+  const SCRIPT_VERSION = '0.3.194';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -6858,13 +6858,18 @@
     if (refSvg) svg.setAttribute('class', refSvg.getAttribute('class') || '');
     svg.innerHTML = `
       <defs>
-        <linearGradient id="rwth-grad" x1="0.5" x2="0.5" y2="1">
-          <stop offset="0" stop-color="#39FF14"/>
-          <stop offset="1" stop-color="#00E5FF"/>
-        </linearGradient>
-        <linearGradient id="rwth-grad-flip" x1="0.5" x2="0.5" y2="1">
+        <!-- Tag fill tracks panel state in the same blue→green language as the
+             header maximise box: a blue tag while the hub is closed, a green
+             tag once open. Each is a single-hue gradient (not the old
+             green↔cyan flip, which read as one teal blob at 24px) so the state
+             is legible at chat-icon size. -->
+        <linearGradient id="rwth-grad-closed" x1="0.5" x2="0.5" y2="1">
           <stop offset="0" stop-color="#00E5FF"/>
-          <stop offset="1" stop-color="#39FF14"/>
+          <stop offset="1" stop-color="#00B8D4"/>
+        </linearGradient>
+        <linearGradient id="rwth-grad-open" x1="0.5" x2="0.5" y2="1">
+          <stop offset="0" stop-color="#39FF14"/>
+          <stop offset="1" stop-color="#00E676"/>
         </linearGradient>
       </defs>
       <path d="M0 80L0 229.5c0 17 6.7 33.3 18.7 45.3l176 176c25 25 65.5 25 90.5 0L418.7 317.3c25-25 25-65.5 0-90.5l-176-176c-12-12-28.3-18.7-45.3-18.7L48 32C21.5 32 0 53.5 0 80zm112 32a32 32 0 1 1 0 64 32 32 0 1 1 0-64z"/>`;
@@ -6975,10 +6980,19 @@
 
       #rwth-launcher.rwth-launcher-chat { cursor: pointer; }
       #rwth-launcher.rwth-launcher-chat svg { display: block; }
-      #rwth-launcher.rwth-launcher-chat svg path { fill: url(#rwth-grad); }
-      #rwth-launcher.rwth-launcher-chat:hover svg { filter: drop-shadow(0 0 3px var(--rwth-secondary)); }
-      #rwth-launcher.rwth-launcher-chat.rwth-launcher-open svg path { fill: url(#rwth-grad-flip); }
+      /* Tag colour is the persistent open/closed tell: blue closed, green open
+         — same language as the maximise box (blue small, green full-screen). */
+      #rwth-launcher.rwth-launcher-chat svg path { fill: url(#rwth-grad-closed); }
+      #rwth-launcher.rwth-launcher-chat.rwth-launcher-open svg path { fill: url(#rwth-grad-open); }
       #rwth-launcher.rwth-launcher-chat.rwth-launcher-open svg { filter: drop-shadow(0 0 3px var(--rwth-accent)); }
+      /* :active presses everywhere; :hover is gated to real pointers so a tap
+         doesn't leave the closed tag stuck glowing on mobile (PDA) — the same
+         sticky-hover fix as the header maximise/close icons. */
+      #rwth-launcher.rwth-launcher-chat:active svg { filter: drop-shadow(0 0 4px var(--rwth-accent)); }
+      @media (hover: hover) {
+        #rwth-launcher.rwth-launcher-chat:hover svg { filter: drop-shadow(0 0 3px var(--rwth-secondary)); }
+        #rwth-launcher.rwth-launcher-chat.rwth-launcher-open:hover svg { filter: drop-shadow(0 0 3px var(--rwth-accent)); }
+      }
 
       #rwth-panel {
         position: fixed;
