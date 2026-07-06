@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.181
+// @version      0.3.182
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.181';
+  const SCRIPT_VERSION = '0.3.182';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -3179,7 +3179,7 @@
     const csigned = n => (n >= 0 ? '+' : '') + fmtCompactMoney(n);
     const chartsOpen = !!(ui.collapsed && ui.collapsed.dashCharts === false);
     const stripBits = [
-      `<span class="rwth-dash-stat">P/L <b class="${cls(s.realized)}">${csigned(s.realized)}</b></span>`,
+      `<span class="rwth-dash-stat rwth-dash-lead${s.realized >= 0 ? ' rwth-dash-pos' : ''}">P/L <b class="${cls(s.realized)}">${csigned(s.realized)}</b></span>`,
       `<span class="rwth-dash-stat">Cap <b>${fmtCompactMoney(s.capitalDeployed)}</b></span>`,
     ];
     if (s.soldCount) stripBits.push(`<span class="rwth-dash-stat">${s.winRate}% win</span>`);
@@ -3271,7 +3271,7 @@
         </div>
         <div class="rwth-ledger-actions">
           ${sortSel}
-          <button class="rwth-btn" type="button" data-action="refresh"${
+          <button class="rwth-btn rwth-btn-ghost rwth-btn-refresh" type="button" data-action="refresh"${
             scanning ? ' disabled' : ''}>${scanning ? 'Scanning...' : '⟳ Refresh'}</button>
           <span class="rwth-scan-status">${escapeAttr(formatLastScanned(L.lastScan, now))}</span>
           <button class="rwth-btn rwth-btn-ghost rwth-btn-gear" type="button" data-action="toggle-scan-settings"
@@ -7178,6 +7178,9 @@
         background: none; color: var(--rwth-secondary); border: 1px solid var(--rwth-border-strong);
       }
       .rwth-btn-ghost:hover { box-shadow: none; color: var(--rwth-accent); border-color: var(--rwth-accent); }
+      /* D2 #29: Refresh is a ghost/outline control — no solid fill or glow — but
+         keeps a comfortable ≥30px tap target. The one solid-neon action is not this. */
+      .rwth-btn-refresh { min-height: 30px; }
 
       .rwth-dash { display: flex; flex-direction: column; gap: var(--rwth-gap-sm); }
       /* Compact always-on summary; the cards/charts drawer folds beneath it. */
@@ -7191,6 +7194,11 @@
         font: 11px var(--rwth-font-mono); color: var(--rwth-muted); white-space: nowrap;
       }
       .rwth-dash-stat b { font: 700 13px var(--rwth-font-mono); color: var(--rwth-text); }
+      /* D2 #29: P/L is the reason the page exists — make it the visual lead in the
+         strip: heavier label, oversized figure, green (--rwth-accent) when positive. */
+      .rwth-dash-lead { font-weight: 700; color: var(--rwth-secondary); }
+      .rwth-dash-lead b { font-size: 18px; }
+      .rwth-dash-pos b { color: var(--rwth-accent); }
       .rwth-dash-toggle {
         flex: none; background: none; border: 1px solid var(--rwth-border-strong);
         border-radius: var(--rwth-radius-ctl); color: var(--rwth-secondary); cursor: pointer; padding: 3px 8px;

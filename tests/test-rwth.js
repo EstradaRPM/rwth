@@ -345,6 +345,29 @@ test('buildLedgerDashboard renders solid realized and dashed projected chart lin
   assert.doesNotMatch(html, />Win rate</);
 });
 
+test('buildLedgerTab demotes Refresh to a ghost/outline control (D2 #29)', () => {
+  const { buildLedgerTab } = globalThis.__RwthPure;
+  const html = buildLedgerTab({ ledger: { items: [], statusFilter: 'all' } });
+  const btn = html.match(/<button[^>]*data-action="refresh"[^>]*>/)[0];
+  // Ghost class present; no longer the solid-neon primary.
+  assert.match(btn, /rwth-btn-ghost/);
+});
+
+test('buildLedgerDashboard promotes P/L to the strip lead, positive when green (D2 #29)', () => {
+  const { buildLedgerDashboard } = globalThis.__RwthPure;
+  const day = 86_400_000;
+  const t0 = Date.UTC(2026, 4, 1);
+  const html = buildLedgerDashboard([
+    {
+      ...soldItem, id: 'sold-lead', buyPrice: 1000, saleNet: 1600,
+      buyTimestamp: t0, soldTimestamp: t0 + 2 * day,
+    },
+  ], t0 + 4 * day);
+  const stat = html.match(/<span class="rwth-dash-stat[^"]*">P\/L[\s\S]*?<\/span>/)[0];
+  assert.match(stat, /rwth-dash-lead/);
+  assert.match(stat, /rwth-dash-pos/);
+});
+
 test('buildLedgerDashboard opens projection popup with safe period controls', () => {
   const { buildLedgerDashboard } = globalThis.__RwthPure;
   const day = 86_400_000;
