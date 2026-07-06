@@ -363,9 +363,36 @@ test('buildLedgerDashboard promotes P/L to the strip lead, positive when green (
       buyTimestamp: t0, soldTimestamp: t0 + 2 * day,
     },
   ], t0 + 4 * day);
-  const stat = html.match(/<span class="rwth-dash-stat[^"]*">P\/L[\s\S]*?<\/span>/)[0];
+  const stat = html.match(/<span class="rwth-dash-stat[^"]*"><span class="rwth-dash-k">P\/L<\/span>/)[0];
   assert.match(stat, /rwth-dash-lead/);
   assert.match(stat, /rwth-dash-pos/);
+});
+
+test('collapsed dash strip stats are aligned label-over-value cells (narrow-width reflow)', () => {
+  const { buildLedgerDashboard } = globalThis.__RwthPure;
+  const day = 86_400_000;
+  const t0 = Date.UTC(2026, 4, 1);
+  const html = buildLedgerDashboard([
+    {
+      ...soldItem, id: 'sold-cell', buyPrice: 1000, saleNet: 1600,
+      buyTimestamp: t0, soldTimestamp: t0 + 2 * day,
+    },
+  ], t0 + 4 * day);
+  // Every strip stat is a self-contained cell carrying a label (rwth-dash-k) and
+  // a value (rwth-dash-v) so they line up in columns when the strip wraps.
+  const cells = html.match(/<span class="rwth-dash-stat[^"]*">[\s\S]*?<\/span><\/span>/g);
+  assert.ok(cells && cells.length >= 2, 'strip should render multiple stat cells');
+  for (const c of cells) {
+    assert.match(c, /<span class="rwth-dash-k">/, 'stat cell carries an aligned label');
+    assert.match(c, /<span class="rwth-dash-v">/, 'stat cell carries an aligned value');
+  }
+  // Container uses an auto-fit grid so columns reflow/align at narrow width.
+  const start = SCRIPT_SOURCE.indexOf('.rwth-dash-stats {');
+  assert.notStrictEqual(start, -1, '.rwth-dash-stats rule should exist');
+  const block = SCRIPT_SOURCE.slice(start, SCRIPT_SOURCE.indexOf('}', start));
+  assert.match(block, /display:\s*grid/, 'stats container should be a grid');
+  assert.match(block, /grid-template-columns:\s*repeat\(auto-fit/,
+    'stats grid should reflow into aligned auto-fit columns');
 });
 
 test('buildLedgerDashboard opens projection popup with safe period controls', () => {

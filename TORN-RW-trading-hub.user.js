@@ -3178,12 +3178,19 @@
     // dashCharts collapse key.
     const csigned = n => (n >= 0 ? '+' : '') + fmtCompactMoney(n);
     const chartsOpen = !!(ui.collapsed && ui.collapsed.dashCharts === false);
+    // Each stat is a self-contained label-over-value cell so the strip reflows
+    // into aligned columns (grid, see .rwth-dash-stats) instead of loose inline
+    // flow — keeps the P/L / Cap / win / mugs columns coherent when the panel is
+    // thin (e.g. a Fold front screen ~340px wide).
+    const cell = (k, v, extra = '') =>
+      `<span class="rwth-dash-stat${extra}"><span class="rwth-dash-k">${k}</span><span class="rwth-dash-v">${v}</span></span>`;
     const stripBits = [
-      `<span class="rwth-dash-stat rwth-dash-lead${s.realized >= 0 ? ' rwth-dash-pos' : ''}">P/L <b class="${cls(s.realized)}">${csigned(s.realized)}</b></span>`,
-      `<span class="rwth-dash-stat">Cap <b>${fmtCompactMoney(s.capitalDeployed)}</b></span>`,
+      cell('P/L', `<b class="${cls(s.realized)}">${csigned(s.realized)}</b>`,
+        ' rwth-dash-lead' + (s.realized >= 0 ? ' rwth-dash-pos' : '')),
+      cell('Cap', `<b>${fmtCompactMoney(s.capitalDeployed)}</b>`),
     ];
-    if (s.soldCount) stripBits.push(`<span class="rwth-dash-stat">${s.winRate}% win</span>`);
-    if (s.mugLossTotal > 0) stripBits.push(`<span class="rwth-dash-stat">mugs <b class="rwth-roi-neg">${fmtCompactMoney(-s.mugLossTotal)}</b></span>`);
+    if (s.soldCount) stripBits.push(cell('win', `<b>${s.winRate}%</b>`));
+    if (s.mugLossTotal > 0) stripBits.push(cell('mugs', `<b class="rwth-roi-neg">${fmtCompactMoney(-s.mugLossTotal)}</b>`));
 
     return `<div class="rwth-dash">
       <div class="rwth-dash-strip">
@@ -7189,10 +7196,21 @@
         border: 1px solid var(--rwth-border); border-radius: var(--rwth-radius-card);
         padding: 7px var(--rwth-pad-card); background: var(--rwth-fill-faint);
       }
-      .rwth-dash-stats { display: flex; flex-wrap: wrap; gap: 3px 12px; min-width: 0; }
-      .rwth-dash-stat {
-        font: 11px var(--rwth-font-mono); color: var(--rwth-muted); white-space: nowrap;
+      /* Responsive stat cells: auto-fit grid columns reflow into aligned rows so
+         labels/values stay in coherent columns when the strip is thin (~340px). */
+      .rwth-dash-stats {
+        display: grid; grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+        gap: 6px 12px; min-width: 0; flex: 1 1 auto; align-items: end;
       }
+      .rwth-dash-stat {
+        display: flex; flex-direction: column; gap: 1px; min-width: 0;
+        font: 11px var(--rwth-font-mono); color: var(--rwth-muted);
+      }
+      .rwth-dash-k {
+        font-size: 10px; text-transform: uppercase; letter-spacing: .4px;
+        color: var(--rwth-muted);
+      }
+      .rwth-dash-v { white-space: nowrap; }
       .rwth-dash-stat b { font: 700 13px var(--rwth-font-mono); color: var(--rwth-text); }
       /* D2 #29: P/L is the reason the page exists — make it the visual lead in the
          strip: heavier label, oversized figure, green (--rwth-accent) when positive. */
