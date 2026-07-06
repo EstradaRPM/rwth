@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.194
+// @version      0.3.195
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.194';
+  const SCRIPT_VERSION = '0.3.195';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -2098,6 +2098,7 @@
     const detail = `<div class="rwth-row-detail">
         <div class="rwth-row-meta">
           <span>Quality: ${item.quality != null ? item.quality + '%' : '—'}</span>
+          <span>Bonus: ${bonus ? escapeAttr(bonus) : '—'}</span>
           <span>Bought: ${fmtDate(item.buyTimestamp)}</span>
           <span>Source: ${escapeAttr(item.buySource)}</span>
         </div>
