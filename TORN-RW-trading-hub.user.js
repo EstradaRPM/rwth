@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.207
+// @version      0.3.208
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.207';
+  const SCRIPT_VERSION = '0.3.208';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4675,8 +4675,9 @@
       <div class="rwth-form-row">
         <label class="rwth-field rwth-field-grow">
           <span class="rwth-field-label">List price</span>
-          <input class="rwth-field-input" type="number" data-adv-field="listPrice"
-                 value="${escapeAttr(item.listPrice)}" placeholder="e.g. 118000000">
+          <input class="rwth-field-input" type="text" inputmode="numeric" data-adv-field="listPrice"
+                 value="${escapeAttr(item.listPrice)}" placeholder="e.g. 118m or 118000000"
+                 autocomplete="off" spellcheck="false">
           ${marketHint}
         </label>
         <div class="rwth-adv-img">
@@ -5507,7 +5508,10 @@
       if (!item) return;
       const lp = advRow.querySelector('[data-adv-field="listPrice"]');
       const gz = advRow.querySelector('[data-adv-field="gyazoUrl"]');
-      if (lp) item.listPrice = numOrNull(lp.value);
+      // #21/3 — parseMoney (not numOrNull) so the list-price field accepts Torn
+      // shorthand: 1.5m → 1_500_000, 118m → 118_000_000, 3.67b → 3_670_000_000.
+      // Blank/garbage → null clears the price, same as the old numOrNull path.
+      if (lp) item.listPrice = parseMoney(lp.value);
       if (gz) item.gyazoUrl = gz.value.trim() || null;
       Store.set('rwth_ledger', MEM.ledger.items);
       if (e.type === 'change') render();
