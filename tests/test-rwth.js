@@ -477,11 +477,11 @@ test('#28/D5 — BUY/ASK/ROI align on a bare unit under the shared column track'
   assert.match(html, /<span class="rwth-th">buy<\/span>/);
   assert.match(html, /<span class="rwth-th">ask<\/span>/);
   assert.match(html, /<span class="rwth-th">roi<\/span>/);
-  // BUY renders as a bare compact unit (no repeated $), and ASK's inline input
-  // shows the same bare unit — the two money columns share one alignment unit.
+  // BUY renders as a bare compact unit (no repeated $). ASK's inline input carries
+  // a $ ($175m) so an editable price reads distinctly from the static figure cells.
   assert.match(html, /class="rwth-cell-v">100m<\/span>/);
-  assert.match(html, /value="175m"/);
-  // No $-prefixed compact figure leaks into the aligned figure cells.
+  assert.match(html, /value="\$175m"/);
+  // No $-prefixed compact figure leaks into the static aligned figure cells' text.
   assert.doesNotMatch(html, /rwth-cell-v[^>]*>\$\d/);
 });
 
@@ -1083,9 +1083,9 @@ test('buildAdvertiseTab default-checks all listed rows with price input + IMG bu
   assert.strictEqual((html.match(/data-adv-check checked/g) || []).length, 2);
   assert.match(html, /data-adv-field="listPrice"/);
   assert.match(html, /data-action="toggle-img"/);
-  // #21/3 — the list-price field reads compact ($118m → 118m) at rest but carries
-  // the exact digits in data-raw for editing (mirrors the ledger inline ask edit).
-  assert.match(html, /data-raw="118000000" value="118m"/);
+  // #21/3 — the list-price field reads as full formatted money ($118,000,000) at
+  // rest but carries the exact digits in data-raw for editing.
+  assert.match(html, /data-raw="118000000" value="\$118,000,000"/);
 });
 
 test('buildAdvertiseTab honours an explicit selectedIds list', () => {

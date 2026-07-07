@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.209
+// @version      0.3.210
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.209';
+  const SCRIPT_VERSION = '0.3.210';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -2111,9 +2111,12 @@
       // the 58px track (and reads like BUY), and carry the raw digits on data-raw
       // so the render layer can swap them in on focus for exact editing.
       const raw = m.ask == null ? '' : m.ask;
-      const disp = m.ask == null ? '' : fmtCompactNum(m.ask);
+      const disp = m.ask == null ? '' : fmtCompactMoney(m.ask);
+      // inputmode="text" (not numeric): the numeric keypad on mobile has no letter
+      // keys, so shorthand like "175m" is untypeable there. A text keyboard lets the
+      // trader type k/m/b; parseMoney turns "175m" into 175_000_000 on commit.
       return `<span class="rwth-cell-v rwth-cell-ctl">`
-        + `<input class="rwth-ask-edit" type="text" inputmode="numeric" data-ask-edit data-row-ctl`
+        + `<input class="rwth-ask-edit" type="text" inputmode="text" data-ask-edit data-row-ctl`
         + ` data-id="${escapeAttr(id)}" data-raw="${escapeAttr(raw)}" value="${escapeAttr(disp)}" aria-label="ask price"></span>`;
     }
     return valCell(m.ask == null ? null : fmtCompactNum(m.ask));
@@ -4644,14 +4647,13 @@
   function buildAdvItemRow(item, checked, imgOpen, markup, mug) {
     const bonus = fmtBonuses(item);
     const hasImg = !!(item.gyazoUrl && String(item.gyazoUrl).trim());
-    // #21/3 — the list-price field mirrors the ledger's inline ask edit: it reads
-    // as compact money (118m) at rest but edits the exact raw value (data-raw),
-    // swapped by syncAskDisplay on focus. Never render the lossy compact figure as
-    // the value at rest without data-raw, or a sibling-field edit would round-trip
-    // it back through parseMoney and truncate the price.
+    // #21/3 — the list-price field reads as full formatted money ($175,000,000) at
+    // rest — the exact figure, not a lossy compact one — and edits the raw digits
+    // (data-raw), swapped by syncAskDisplay on focus. Full formatting is lossless, so
+    // a sibling-field edit can round-trip it through parseMoney without truncation.
     const hasLp = item.listPrice != null && Number.isFinite(Number(item.listPrice));
     const rawLp  = hasLp ? Number(item.listPrice) : '';
-    const dispLp = hasLp ? fmtCompactNum(Number(item.listPrice)) : '';
+    const dispLp = hasLp ? fmtMoney(Number(item.listPrice)) : '';
     // Markup on (#321) — a read-only hint: the marked-up gross to list at on
     // the item market, plus the net it clears (≈ the advertised list price).
     // #331 — a non-zero mug fraction grosses the listing up further.
@@ -4683,9 +4685,9 @@
       <div class="rwth-form-row">
         <label class="rwth-field rwth-field-grow">
           <span class="rwth-field-label">List price</span>
-          <input class="rwth-field-input" type="text" inputmode="numeric" data-adv-field="listPrice"
+          <input class="rwth-field-input" type="text" inputmode="text" data-adv-field="listPrice"
                  data-raw="${escapeAttr(rawLp)}" value="${escapeAttr(dispLp)}"
-                 placeholder="e.g. 118m or 118000000" autocomplete="off" spellcheck="false">
+                 placeholder="e.g. 175m or 175000000" autocomplete="off" spellcheck="false">
           ${marketHint}
         </label>
         <div class="rwth-adv-img">
@@ -5514,10 +5516,8 @@
     if (advRow) {
       const item = (MEM.ledger.items || []).find(i => i.id === advRow.dataset.advItem);
       if (!item) return;
-      // #21/3 — update only the field that fired the event. The list-price field
-      // shows compact money at rest and edits the raw value (syncAskDisplay),
-      // so reading a sibling's at-rest value back through parseMoney would
-      // truncate the lossy compact display (118.5m ≠ 118_456_789). parseMoney
+      // #21/3 — update only the field that fired the event, reading e.target.value
+      // (the field's own current text), never a sibling's at-rest display. parseMoney
       // (not numOrNull) accepts Torn shorthand: 1.5m → 1_500_000, 3.67b →
       // 3_670_000_000; blank/garbage → null clears the price, as numOrNull did.
       const field = e.target.dataset && e.target.dataset.advField;
@@ -5566,10 +5566,13 @@
       if (el.select) el.select();
     } else if (e.type === 'focusout') {
       // No commit fired (an edit would have re-rendered and replaced this input),
-      // so the stored ask still equals data-raw — reset the display to its
-      // compact form rather than leaving the raw digits showing.
+      // so the stored value still equals data-raw — reset the display to its
+      // at-rest form rather than leaving the raw digits showing. The two fields
+      // format differently: the Advertise list-price shows full money ($175,000,000),
+      // the inline ledger ask shows compact money ($175m).
       const raw = el.dataset.raw;
-      el.value = raw ? fmtCompactNum(Number(raw)) : '';
+      const isAdv = el.matches('[data-adv-field="listPrice"]');
+      el.value = raw ? (isAdv ? fmtMoney(Number(raw)) : fmtCompactMoney(Number(raw))) : '';
     }
   }
 

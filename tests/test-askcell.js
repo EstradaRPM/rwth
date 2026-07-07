@@ -46,8 +46,7 @@ console.log('\nlisted ask cell');
     NOW);
   const html = askCellV(m, 'x1');
   assert('is an ask-edit input', /data-ask-edit/.test(html));
-  assert('display value is compact bare unit (175m, no $)', /value="175m"/.test(html));
-  assert('no repeated $ prefix in the ask display', !/value="\$/.test(html));
+  assert('display value is compact money with $ ($175m)', /value="\$175m"/.test(html));
   assert('raw digits ride on data-raw', /data-raw="175000000"/.test(html));
   assert('does NOT show raw digits in the visible value', !/value="175000000"/.test(html));
 }
@@ -59,7 +58,7 @@ console.log('\nhigh ask never clips at rest');
     { status: 'listed', buyPrice: 500_000_000, listPrice: 999_000_000, buyTimestamp: NOW - DAY },
     NOW);
   const html = askCellV(m, 'x2');
-  assert('compact display (999m)', /value="999m"/.test(html));
+  assert('compact display ($999m)', /value="\$999m"/.test(html));
   assert('raw on data-raw', /data-raw="999000000"/.test(html));
 }
 
