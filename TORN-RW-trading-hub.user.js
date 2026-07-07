@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.206
+// @version      0.3.207
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.206';
+  const SCRIPT_VERSION = '0.3.207';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -107,10 +107,16 @@
   // #332 — the retired markupNotice copy field folded into the composed
   // availability line (AvailabilityLine.compose): its wording is now the
   // item-market clause of that single line, so there is no second post line.
+  // The untouched defaults are deliberately call-to-action prompts, not sample
+  // marketing copy: they render into the live forum preview and point the user
+  // straight at the ⚙ Forum gear (Copy to Torn) that edits them, and remind that
+  // clearing a field hides its block. A CTA is self-evidently a placeholder, so
+  // no one mistakes it for finished copy and pastes it — and it makes "write your
+  // own wording" the obvious next step instead of a plausible default to leave be.
   const ADV_COPY_DEFAULTS = {
-    subBanner: 'Open shop // Competitively priced',
-    intro: 'Rotating collection of RW weapons/gear and other useful items. Message me if you want something not listed below.',
-    alsoRotating: 'Also rotating: drugs, plushies, flowers. Check bazaar for live stock.',
+    subBanner: '✎ Click the ⚙ Forum gear to set your shop subtitle — or clear it to hide this line.',
+    intro: '✎ Click the ⚙ Forum gear (in Copy to Torn) to write your own shop intro here — or clear it to hide this line.',
+    alsoRotating: '✎ Click the ⚙ Forum gear to say what else you keep in stock — or clear it to hide this line.',
   };
 
   // #317 — the post palette is themeable. Every colour the HTML builders draw
