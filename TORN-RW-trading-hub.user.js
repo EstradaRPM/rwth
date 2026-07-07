@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.205
+// @version      0.3.206
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.205';
+  const SCRIPT_VERSION = '0.3.206';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -5005,6 +5005,10 @@
     // fields shared across every surface: identity, links, theme/colours, the
     // shared banner picture, and where-buyers-find-you (locations + availability
     // override, which feeds both the forum and signature availability lines).
+    // `resolved.availability` is the final line either way (compose returns a
+    // non-blank override verbatim), so the preview always shows the truth; the
+    // "custom" tag flags when that truth came from the override rather than boxes.
+    const availIsCustom = !!String(settings.availabilityOverride || '').trim();
     const storeBody = `
         <div class="rwth-form-title">Your shop</div>
         <label class="rwth-field">
@@ -5068,11 +5072,15 @@
           <input type="checkbox" data-adv-location="${l.key}"${locations[l.key] ? ' checked' : ''}>
           ${l.label}
         </label>`).join('')}
+        <div class="rwth-avail-preview">
+          <span class="rwth-avail-preview-head">Line in your post${availIsCustom ? ' <span class="rwth-avail-tag">custom</span>' : ''}</span>
+          <p class="rwth-avail-preview-text${resolved.availability ? '' : ' rwth-avail-preview-empty'}">${resolved.availability ? escapeAttr(resolved.availability) : 'No line yet — tick a box above, or write your own below.'}</p>
+        </div>
         <label class="rwth-field">
-          <span class="rwth-field-label">Availability line override</span>
+          <span class="rwth-field-label">Write your own line instead (optional)</span>
           <input class="rwth-field-input" type="text" data-adv-availability
                  value="${escapeAttr(settings.availabilityOverride || '')}"
-                 placeholder="${escapeAttr(resolved.availability || 'Composed from the boxes above')}"
+                 placeholder="Leave blank to build it from the boxes above"
                  autocomplete="off" spellcheck="false">
         </label>`;
 
@@ -8222,6 +8230,28 @@
       .rwth-adv-preview img { max-width: 100%; height: auto; }
       .rwth-adv-preview-note {
         font: italic 10px var(--rwth-font-mono); color: var(--rwth-muted);
+      }
+      /* Readable preview of the composed availability line — shows the actual
+         sentence going into the post, so the override box no longer has to double
+         as a peek at the default (which cut it off, low-contrast, inside the input). */
+      .rwth-avail-preview {
+        display: flex; flex-direction: column; gap: var(--rwth-gap-xs);
+        padding: var(--rwth-gap-sm); background: var(--rwth-fill-faint);
+        border: 1px solid var(--rwth-border-soft); border-radius: var(--rwth-radius-ctl);
+      }
+      .rwth-avail-preview-head {
+        display: flex; align-items: center; gap: 6px;
+        font: 600 11px var(--rwth-font-ui); color: var(--rwth-muted);
+      }
+      .rwth-avail-preview-text {
+        margin: 0; font: 12px var(--rwth-font-ui); color: var(--rwth-text);
+        line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+      }
+      .rwth-avail-preview-empty { color: var(--rwth-muted); font-style: italic; }
+      .rwth-avail-tag {
+        font: 600 9px var(--rwth-font-mono); letter-spacing: .4px; text-transform: uppercase;
+        color: var(--rwth-accent); border: 1px solid var(--rwth-border-strong);
+        border-radius: var(--rwth-radius-ctl); padding: 1px 4px;
       }
       .rwth-output { display: flex; flex-direction: column; gap: var(--rwth-gap-sm); }
       .rwth-output-head {
