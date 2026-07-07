@@ -1083,7 +1083,9 @@ test('buildAdvertiseTab default-checks all listed rows with price input + IMG bu
   assert.strictEqual((html.match(/data-adv-check checked/g) || []).length, 2);
   assert.match(html, /data-adv-field="listPrice"/);
   assert.match(html, /data-action="toggle-img"/);
-  assert.match(html, /value="118000000"/);
+  // #21/3 — the list-price field reads compact ($118m → 118m) at rest but carries
+  // the exact digits in data-raw for editing (mirrors the ledger inline ask edit).
+  assert.match(html, /data-raw="118000000" value="118m"/);
 });
 
 test('buildAdvertiseTab honours an explicit selectedIds list', () => {

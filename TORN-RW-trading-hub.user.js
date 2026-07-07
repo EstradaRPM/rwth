@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.208
+// @version      0.3.209
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.208';
+  const SCRIPT_VERSION = '0.3.209';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4644,6 +4644,14 @@
   function buildAdvItemRow(item, checked, imgOpen, markup, mug) {
     const bonus = fmtBonuses(item);
     const hasImg = !!(item.gyazoUrl && String(item.gyazoUrl).trim());
+    // #21/3 — the list-price field mirrors the ledger's inline ask edit: it reads
+    // as compact money (118m) at rest but edits the exact raw value (data-raw),
+    // swapped by syncAskDisplay on focus. Never render the lossy compact figure as
+    // the value at rest without data-raw, or a sibling-field edit would round-trip
+    // it back through parseMoney and truncate the price.
+    const hasLp = item.listPrice != null && Number.isFinite(Number(item.listPrice));
+    const rawLp  = hasLp ? Number(item.listPrice) : '';
+    const dispLp = hasLp ? fmtCompactNum(Number(item.listPrice)) : '';
     // Markup on (#321) — a read-only hint: the marked-up gross to list at on
     // the item market, plus the net it clears (≈ the advertised list price).
     // #331 — a non-zero mug fraction grosses the listing up further.
@@ -4676,8 +4684,8 @@
         <label class="rwth-field rwth-field-grow">
           <span class="rwth-field-label">List price</span>
           <input class="rwth-field-input" type="text" inputmode="numeric" data-adv-field="listPrice"
-                 value="${escapeAttr(item.listPrice)}" placeholder="e.g. 118m or 118000000"
-                 autocomplete="off" spellcheck="false">
+                 data-raw="${escapeAttr(rawLp)}" value="${escapeAttr(dispLp)}"
+                 placeholder="e.g. 118m or 118000000" autocomplete="off" spellcheck="false">
           ${marketHint}
         </label>
         <div class="rwth-adv-img">
@@ -5506,13 +5514,16 @@
     if (advRow) {
       const item = (MEM.ledger.items || []).find(i => i.id === advRow.dataset.advItem);
       if (!item) return;
-      const lp = advRow.querySelector('[data-adv-field="listPrice"]');
-      const gz = advRow.querySelector('[data-adv-field="gyazoUrl"]');
-      // #21/3 — parseMoney (not numOrNull) so the list-price field accepts Torn
-      // shorthand: 1.5m → 1_500_000, 118m → 118_000_000, 3.67b → 3_670_000_000.
-      // Blank/garbage → null clears the price, same as the old numOrNull path.
-      if (lp) item.listPrice = parseMoney(lp.value);
-      if (gz) item.gyazoUrl = gz.value.trim() || null;
+      // #21/3 — update only the field that fired the event. The list-price field
+      // shows compact money at rest and edits the raw value (syncAskDisplay),
+      // so reading a sibling's at-rest value back through parseMoney would
+      // truncate the lossy compact display (118.5m ≠ 118_456_789). parseMoney
+      // (not numOrNull) accepts Torn shorthand: 1.5m → 1_500_000, 3.67b →
+      // 3_670_000_000; blank/garbage → null clears the price, as numOrNull did.
+      const field = e.target.dataset && e.target.dataset.advField;
+      if (field === 'listPrice') item.listPrice = parseMoney(e.target.value);
+      else if (field === 'gyazoUrl') item.gyazoUrl = e.target.value.trim() || null;
+      else return;
       Store.set('rwth_ledger', MEM.ledger.items);
       if (e.type === 'change') render();
     }
@@ -5544,10 +5555,12 @@
   // value (data-raw) and selects it; focusout with no commit (no `change`, so
   // syncLedgerRowEdit never re-rendered) reformats back to compact so the cell
   // never lingers on raw digits. A committed edit re-renders and replaces the
-  // input, so this focusout runs only on the unedited path.
+  // input, so this focusout runs only on the unedited path. #21/3 — the Advertise
+  // tab's list-price field (data-adv-field="listPrice") carries the same data-raw
+  // compact/raw pair and shares this swap; its commit path is syncAdvertiseEdit.
   function syncAskDisplay(e) {
     const el = e.target;
-    if (!el || !el.matches || !el.matches('[data-ask-edit]')) return;
+    if (!el || !el.matches || !el.matches('[data-ask-edit], [data-adv-field="listPrice"]')) return;
     if (e.type === 'focusin') {
       el.value = el.dataset.raw || '';
       if (el.select) el.select();
