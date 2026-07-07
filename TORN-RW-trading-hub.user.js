@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.211
+// @version      0.3.212
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.211';
+  const SCRIPT_VERSION = '0.3.212';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1795,20 +1795,27 @@
         const cat = scanCategory(sell.itemName, cats);
         const matched = matchSell(sell, saleMatchItems);
         enrichSellBonus(sell, matched);
-        // A sale is RW only when it PROVES it: its item resolves to an RW
-        // category (the cats index holds ONLY weapon/armor names, so anything
-        // else — a drug, a plushie, an unrelated bazaar dump — resolves to no
-        // category) or it closes an open RW ledger row. Matching is the escape
-        // hatch for a tracked RW item whose name isn't in the cats index yet.
-        // The old `cat && !isRwCategory(cat)` gate ignored only KNOWN non-RW
-        // names and let every unclassified (cat=null) sale import as income;
-        // unlike buys, a sale never runs itemdetails, so this is its only guard.
+        // Two levels of RW proof for a scanned sale — a sale log carries no
+        // bonus, so this is its only guard (unlike buys, it never runs
+        // itemdetails):
+        //   • MATCHED — it closes an open/staged RW ledger row. Unequivocal RW.
+        //   • RW-by-category only — its item resolves to a weapon/armor name.
+        //     But a weapon that exists as BOTH an RW and a plain market variant
+        //     (same name, same category: DBK, Enfield, …) resolves to that RW
+        //     category for the plain variant too. The value guard in matchSell
+        //     already refuses to close the pricey RW row with a cheap variant
+        //     sale, so the variant lands here as matched=null and would import
+        //     as phantom income.
+        // So: not-RW AND unmatched → ignore (drugs/plushies/junk dumps); RW-by-
+        // category BUT unmatched → still stage (visible + recoverable) but
+        // default UNCHECKED, so an ambiguous plain-variant sale never
+        // auto-imports while a proven (matched) RW sale stays hands-free.
         if (!isRwCategory(cat) && !matched) {
           preview.ignored.push({ type: 'ignored', reason: 'non-RW sale', eventKeys, itemName: sell.itemName });
         } else {
           const duplicate = txSeen.has(txKey(sell));
           if (!duplicate) txSeen.add(txKey(sell));
-          preview.sales.push({ sell, matchedId: matched ? matched.id : null, duplicate, eventKeys });
+          preview.sales.push({ sell, matchedId: matched ? matched.id : null, duplicate, checked: !!matched, eventKeys });
         }
         addEventKeys(eventKeys);
       } else if (row.type === 'mug') {
@@ -2587,7 +2594,9 @@
       const sell = r.sell || {};
       const key = escapeAttr((r.eventKeys || []).join('|') || `sale-${idx}`);
       const checked = r.checked === false ? '' : ' checked';
-      const dest = r.duplicate ? 'already logged' : r.matchedId ? 'matched' : 'recent';
+      const dest = r.checked === false ? 'skipped'
+        : r.duplicate ? 'already logged'
+          : r.matchedId ? 'matched' : 'recent';
       return `<label class="rwth-scan-line rwth-scan-check-line" data-scan-sale="${key}">
         <input type="checkbox" data-scan-sale-check${checked}>
         <span>${escapeAttr(sell.itemName) || 'Unparsed sale'}</span>

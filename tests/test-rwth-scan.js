@@ -380,7 +380,7 @@ test('matchSell still closes legacy rows with no recorded uid by name', () => {
     P.matchSell({ itemName: 'Diamond Bladed Knife', uid: 999 }, held).id, 'legacy');
 });
 
-test('buildScanPreview routes a non-RW variant sale to recent, not the held RW row', () => {
+test('buildScanPreview stages a non-RW variant sale unchecked, not attached to the held RW row', () => {
   const buy = P.classifyLogEvent({
     id: 'buy-rw',
     timestamp: 1779280000,
@@ -397,8 +397,32 @@ test('buildScanPreview routes a non-RW variant sale to recent, not the held RW r
 
   assert.strictEqual(preview.buys.length, 1);
   assert.strictEqual(preview.sales.length, 1);
-  // Must NOT attach the cheap non-RW sale to the held RW buy.
+  // Must NOT attach the cheap non-RW sale to the held RW buy…
   assert.strictEqual(preview.sales[0].matchedId, null);
+  // …and, unmatched, it must default UNCHECKED so it never auto-imports as
+  // phantom income — the user commits without having to uncheck it by hand.
+  assert.strictEqual(preview.sales[0].checked, false);
+});
+
+test('buildScanPreview keeps a matched RW sale checked so tracked sales import hands-free', () => {
+  // The genuine RW instance the user holds and then sells — same scan captures
+  // the auction buy, and the sale closes it: proven RW, stays checked.
+  const buy = P.classifyLogEvent({
+    id: 'buy-rw-match',
+    timestamp: 1779280000,
+    data: { item: { id: 614, uid: 333, name: 'Diamond Bladed Knife' }, final_price: 75_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-rw-match', {}, cats);
+  const sale = P.classifyLogEvent({
+    id: 'sale-rw-match',
+    timestamp: 1779372185,
+    data: { item: [{ id: 614, uid: 333, name: 'Diamond Bladed Knife' }], net: 90_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-rw-match', {}, cats);
+
+  const preview = P.buildScanPreview([buy, sale], { cats, items: [], transactions: [] });
+
+  assert.strictEqual(preview.sales.length, 1);
+  assert.match(preview.sales[0].matchedId, /^scan-buy:/);
+  assert.strictEqual(preview.sales[0].checked, true);
 });
 
 test('buildScanPreview ignores an unrelated bazaar sale that is not an RW item', () => {
@@ -554,7 +578,8 @@ test('dismissedKeySet flattens all eventKeys and buildDismissedUi renders restor
 
 // ─── S3 (#18) — sales/review checkboxes + uncapped lists + commit honors them ─
 
-// Six RW sales in one preview, so we can prove the ×5 cap is gone.
+// Six matched RW sales in one preview, so we can prove the ×5 cap is gone while
+// each row is a proven (matched) RW sale — the case that defaults checked.
 function sixSalePreview() {
   const rows = [];
   for (let i = 0; i < 6; i++) {
@@ -564,7 +589,11 @@ function sixSalePreview() {
       data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 90_000_000 + i, buyer: 'BuyerName' },
     }, P.SCAN_LOG_TYPES.itemMarketSale, `sale-cap-${i}`, {}, cats));
   }
-  return P.buildScanPreview(rows, { cats, items: [], transactions: [] });
+  return P.buildScanPreview(rows, {
+    cats,
+    items: [{ id: 'held-dbk', itemName: 'Diamond Bladed Knife', status: 'held', bonuses: [] }],
+    transactions: [],
+  });
 }
 
 test('buildScanPreviewUi renders every sale (no ×5 cap) with a default-checked checkbox', () => {
@@ -574,7 +603,7 @@ test('buildScanPreviewUi renders every sale (no ×5 cap) with a default-checked 
   // The 6th sale row renders — the old slice(0,5) would have dropped it.
   const saleRows = (ui.match(/data-scan-sale=/g) || []).length;
   assert.strictEqual(saleRows, 6);
-  // Sales default checked (preserves today's import-all behavior).
+  // A matched (proven-RW) sale defaults checked so tracked sales import hands-free.
   assert.match(ui, /data-scan-sale-check checked/);
   // Long lists scroll inside a bounded container.
   assert.match(ui, /rwth-scan-scroll/);
