@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.202
+// @version      0.3.203
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.202';
+  const SCRIPT_VERSION = '0.3.203';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4878,10 +4878,13 @@
           ${bazaarItemsField}
         </div>`
       : '';
+    // Label the gear with the active surface so it reads as "settings for THIS
+    // surface" and fills the left of the switcher's action row.
+    const surfaceLabel = surface ? surface.charAt(0).toUpperCase() + surface.slice(1) : '';
     return `<div class="rwth-adv-gear">
         <button class="rwth-gear-btn${open ? ' is-open' : ''}${hasImg ? ' has-img' : ''}" type="button"
                 data-action="toggle-adv-gear" aria-expanded="${open ? 'true' : 'false'}"
-                aria-label="Settings for this surface" title="Settings for this surface">⚙${
+                aria-label="${escapeAttr(surfaceLabel)} settings" title="${escapeAttr(surfaceLabel)} settings">⚙ <span class="rwth-gear-label">${surfaceLabel}</span>${
           hasImg ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
         ${pop}
       </div>`;
@@ -5113,8 +5116,9 @@
       const activeHtml = renderSurface(settings);
       const activePreview = renderSurface({ ...settings, viewCounterUrl: '' });
       const segBtns = SURFACES.map(su =>
-        `<button class="rwth-filter${su.key === activeSurface ? ' rwth-filter-active' : ''}" type="button"
-               data-action="set-adv-surface" data-surface="${su.key}">${su.label}</button>`).join('');
+        `<button class="rwth-seg-btn${su.key === activeSurface ? ' rwth-seg-btn-active' : ''}" type="button"
+               data-action="set-adv-surface" data-surface="${su.key}"
+               aria-pressed="${su.key === activeSurface ? 'true' : 'false'}">${su.label}</button>`).join('');
       const surfaceBody = showSurfaceRaw
         ? `<textarea class="rwth-field-input rwth-output-box" id="rwth-out-surface" rows="12"
                    spellcheck="false">${escapeAttr(activeHtml)}</textarea>`
@@ -5125,12 +5129,13 @@
       // carrying the ACTIVE surface's picture override. It re-adapts as the switcher
       // changes because it reads activeSurface on every render.
       const surfaceGear = buildAdvSurfaceGear(activeSurface, settings, !!ui.advSurfaceGearOpen, copy);
+      // Two-row head so nothing wraps in the narrow panel: the three surface tabs
+      // are a full-width connected segmented control on row 1; the gear (labelled
+      // with the active surface) and the Copy/Edit HTML actions share row 2.
       const surfaceSwitcher = `
-        <div class="rwth-output-head">
-          <div class="rwth-adv-surface-switch">
-            <div class="rwth-filters">${segBtns}</div>
-            ${surfaceGear}
-          </div>
+        <div class="rwth-seg" role="tablist">${segBtns}</div>
+        <div class="rwth-output-head rwth-adv-surface-head">
+          ${surfaceGear}
           <div class="rwth-adv-surface-actions">
             <button class="rwth-btn-sm" type="button" data-action="copy-output"
                     data-copy-target="rwth-out-surface">Copy HTML</button>
@@ -8126,15 +8131,34 @@
       /* #325 — surface switcher: stacks the head, preview/textarea, and note. */
       .rwth-adv-surface { display: flex; flex-direction: column; gap: var(--rwth-gap-sm); }
       .rwth-adv-surface-actions { display: flex; gap: 4px; }
-      /* #32 — the segmented control + its picture gear share a left group so the
-         gear "hangs off" the switcher; the gear anchors its own caret popover. */
-      .rwth-adv-surface-switch { display: flex; align-items: center; gap: 6px; }
+      /* Surface switcher as a full-width connected segmented control on its own
+         row, so the three tabs never wrap against the gear + Copy/Edit actions
+         (which drop to the row below). */
+      .rwth-seg {
+        display: flex; width: 100%;
+        border: 1px solid var(--rwth-border); border-radius: var(--rwth-radius-ctl);
+        overflow: hidden;
+      }
+      .rwth-seg-btn {
+        flex: 1 1 0; min-width: 0; text-align: center; cursor: pointer;
+        background: none; border: none; border-left: 1px solid var(--rwth-border);
+        color: var(--rwth-muted); padding: 6px 4px; line-height: 1;
+        font: 600 10px var(--rwth-font-mono); text-transform: uppercase; letter-spacing: .4px;
+      }
+      .rwth-seg-btn:first-child { border-left: none; }
+      .rwth-seg-btn:hover { color: var(--rwth-text); }
+      .rwth-seg-btn-active { color: var(--rwth-bg); background: var(--rwth-accent); }
+      /* Row 2: gear on the left, Copy/Edit HTML on the right. */
+      .rwth-adv-surface-head { margin-top: var(--rwth-gap-sm); }
+      /* #32 — the gear anchors its own caret popover; it now sits on the switcher's
+         action row rather than hanging off the (previously wrapping) tab group. */
       .rwth-adv-gear { position: relative; display: inline-flex; }
+      .rwth-gear-label { text-transform: uppercase; letter-spacing: .3px; font-size: 10px; }
       .rwth-gear-btn {
-        display: inline-flex; align-items: center; gap: 3px; cursor: pointer;
+        display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
         background: transparent; color: var(--rwth-muted);
         border: 1px solid var(--rwth-border-strong); border-radius: var(--rwth-radius-ctl);
-        padding: 3px 7px; font: 12px var(--rwth-font-mono); line-height: 1;
+        padding: 4px 9px; font: 12px var(--rwth-font-mono); line-height: 1;
       }
       .rwth-gear-btn:hover { color: var(--rwth-text); border-color: var(--rwth-secondary-strong); }
       .rwth-gear-btn.has-img { color: var(--rwth-accent); border-color: var(--rwth-accent); }
