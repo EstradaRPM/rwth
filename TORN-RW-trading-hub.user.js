@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.204
+// @version      0.3.205
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.204';
+  const SCRIPT_VERSION = '0.3.205';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4816,7 +4816,8 @@
                     spellcheck="false">${g('intro')}</textarea>
         </label>
         <label class="rwth-field">
-          <span class="rwth-field-label">Also-rotating note</span>
+          <span class="rwth-field-label">Other stock note</span>
+          <span class="rwth-field-hint">Mention items you sell that aren't in the list above</span>
           <input class="rwth-field-input" type="text" data-adv-copy="alsoRotating"
                  value="${g('alsoRotating')}"
                  autocomplete="off" spellcheck="false">
@@ -7534,6 +7535,10 @@
       .rwth-field-help a:hover, .rwth-field-help a:focus { color: var(--rwth-secondary); }
       .rwth-field-label {
         font: 600 11px var(--rwth-font-mono); color: var(--rwth-secondary); letter-spacing: .3px;
+      }
+      .rwth-field-hint {
+        display: block; margin: -2px 0 2px;
+        font: italic 400 10px var(--rwth-font-mono); color: var(--rwth-muted); letter-spacing: .2px;
       }
       .rwth-field-input {
         background: #111; color: var(--rwth-text); border: 1px solid var(--rwth-border-strong);
