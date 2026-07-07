@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.203
+// @version      0.3.204
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.203';
+  const SCRIPT_VERSION = '0.3.204';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -7378,6 +7378,34 @@
            inputs, chips). Ad-hoc 3/4/6px call sites point at these. */
         --rwth-radius-card: 6px;
         --rwth-radius-ctl: 4px;
+      }
+
+      /* Ease the state changes our interactive controls already make on
+         :hover / :active / :focus (colour, border, fill, glow) so they fade
+         instead of snap. Deliberately NO transform here: a couple of controls
+         scale on ungated :hover, and on mobile that hover sticks after a tap
+         (the documented tap-stick bug) — easing a stuck scale would only make
+         it more visible. :active fires on touch too, so this polish reaches
+         mobile presses as well; the reduced-motion guard below opts out. */
+      .rwth-btn, .rwth-btn-ghost, .rwth-btn-sm, .rwth-btn-danger, .rwth-btn-gear,
+      .rwth-cell-btn, .rwth-icon-btn, .rwth-proj-btn, .rwth-filter, .rwth-sort-dir,
+      .rwth-collapse-head, .rwth-dash-toggle, .rwth-seg-btn, .rwth-gear-btn,
+      .rwth-swatch-btn, .rwth-swatch, .rwth-row-head, .rwth-field-input,
+      .rwth-card-drill-toggle, .rwth-field-help a {
+        transition: color .12s ease, border-color .12s ease,
+                    background-color .12s ease, box-shadow .12s ease;
+      }
+
+      /* Respect the OS "reduce motion" preference. Scoped to our own roots so
+         we never slap !important transition resets onto the host Torn page;
+         !important is needed because these zero out the class-level rules above
+         and the panel/popover open animations regardless of source order. */
+      @media (prefers-reduced-motion: reduce) {
+        #rwth-panel, #rwth-panel *, #rwth-launcher, #rwth-launcher * {
+          transition-duration: .001ms !important;
+          animation-duration: .001ms !important;
+          animation-iteration-count: 1 !important;
+        }
       }
 
       #rwth-launcher.rwth-launcher-chat { cursor: pointer; }
