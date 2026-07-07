@@ -1171,15 +1171,35 @@ test('toForumHtml omits the Recent Transactions section when there are none', ()
 
 test('toBazaarHtml uses the Verdana font scheme, not all-Courier', () => {
   const { AdvertiseGenerator } = globalThis.__RwthPure;
-  const html = AdvertiseGenerator.toBazaarHtml(advSettings);
+  const html = AdvertiseGenerator.toBazaarHtml(advItems, advSettings);
   assert.match(html, /font-family: Verdana, Geneva, sans-serif/);
   assert.doesNotMatch(html, /Courier/);
 });
 
 test('toBazaarHtml renders the bazaar banner and drops it when blank', () => {
   const { AdvertiseGenerator } = globalThis.__RwthPure;
-  assert.match(AdvertiseGenerator.toBazaarHtml(advSettings), /src="https:\/\/i\.gyazo\.com\/banner\.jpg"/);
-  assert.doesNotMatch(AdvertiseGenerator.toBazaarHtml({}), /<img/);
+  assert.match(AdvertiseGenerator.toBazaarHtml(advItems, advSettings), /src="https:\/\/i\.gyazo\.com\/banner\.jpg"/);
+  assert.doesNotMatch(AdvertiseGenerator.toBazaarHtml(advItems, {}), /<img/);
+});
+
+// #34 — opt-in RW-item listings on the bazaar advert. Default OFF must leave the
+// bazaar output byte-for-byte identical to the items-absent render (nothing
+// leaks); ON renders the shared compact signature-card catalogue under an
+// "Also available — RW gear" divider, never the forum's image cards.
+test('toBazaarHtml hides RW items by default and lists them only when opted in', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const off = AdvertiseGenerator.toBazaarHtml(advItems, advSettings);
+  // Default-off is byte-for-byte identical to the items-absent render — no leak.
+  assert.strictEqual(off, AdvertiseGenerator.toBazaarHtml([], advSettings));
+  assert.doesNotMatch(off, /Also available/);
+  assert.doesNotMatch(off, /Enfield SA-80/);
+  // Opt-in: the divider + the shared compact cards (name + compact price) appear,
+  // and it is NOT the forum's heavy image card (no per-item screenshot markup).
+  const on = AdvertiseGenerator.toBazaarHtml(advItems, { ...advSettings, bazaarShowItems: true });
+  assert.match(on, /Also available &mdash; RW gear/);
+  assert.match(on, /Enfield SA-80/);
+  assert.match(on, /\$118m/);
+  assert.doesNotMatch(on, /i\.gyazo\.com\/abc/);
 });
 
 test('toSignatureHtml is item-driven and condensed with compact prices', () => {

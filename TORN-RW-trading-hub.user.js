@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.198
+// @version      0.3.202
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.198';
+  const SCRIPT_VERSION = '0.3.202';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -442,7 +442,12 @@
       // Only meaningful when markup is on; the builders read it together with the
       // markup flag before applying the mug gross-up. Default off.
       const mugMarkup = s.mugMarkup === true;
-      return { identity, theme, copy, sections, locations, availability, images, markup, mugMarkup };
+      // #34 — opt-in "show my RW items on the bazaar advert" toggle. Default OFF
+      // so every existing install's bazaar output stays byte-for-byte unchanged.
+      // When on, toBazaarHtml renders the shared selected set as the compact
+      // signature-card catalogue under an "Also available" divider.
+      const bazaarShowItems = s.bazaarShowItems === true;
+      return { identity, theme, copy, sections, locations, availability, images, markup, mugMarkup, bazaarShowItems };
     },
   };
 
@@ -514,13 +519,15 @@
       // box (now inside the ⚙ popup) start open.
       collapsed: {
         // #324 — Advertise hub bars. The pivotal items area opens by default;
-        // the set-once branding/copy folds (brandLook, postText), the optional
-        // transactions block, the per-surface picture overrides, and the copy
-        // boxes all start folded so the working view stays short.
-        advItems: false, brandLook: true, postText: true, advTx: true,
+        // the set-once branding fold (storeBrand) and the optional transactions
+        // block start folded so the working view stays short. (#32 retired the
+        // Brand & look picture-override collapse — the per-surface picture now lives
+        // in the surface-switcher gear; #33 retired the Post-text accordion — the
+        // forum copy blocks now live in the forum gear.)
+        advItems: false, storeBrand: true, advTx: true,
         // #325 — the unified "Copy to Torn" section now carries the live preview
         // (it used to be its own always-open section), so it starts open.
-        advImagesAdv: true, advOutputs: false,
+        advOutputs: false,
         saleLog: false, analytics: true,
         // #14 — dismissed-scan-rows drawer folds by default (recovery is rare).
         scanDismissed: true,
@@ -543,6 +550,11 @@
       // #318 — which Brand & look colour-override field has its swatch popover
       // open (null = none). Only one is open at a time, mirroring settingsImgEdit.
       advColorOpen: null,
+      // #32 — whether the Copy-to-Torn surface-switcher gear popover is open. The
+      // popover always carries the ACTIVE surface's picture override, so a single
+      // boolean suffices; it re-adapts as advSurface changes. Click-toggled (never
+      // :hover — that reintroduced the mobile tap-stick bug, v0.3.194).
+      advSurfaceGearOpen: false,
     },
     ledger: {
       items: [],
@@ -613,6 +625,10 @@
       // a possible mug on the cash after the sale, using intel.mugBuffer. Default
       // off so current item-market prices are unchanged until opted in.
       mugMarkup: false,
+      // #34 — opt-in "show my RW items on the bazaar advert". Default off so the
+      // bazaar output stays byte-for-byte unchanged for every existing install
+      // until they turn it on from the bazaar gear.
+      bazaarShowItems: false,
       scanSources: { ...DEFAULT_SCAN_SOURCES },
       scanBackTo: '',
     },
@@ -4350,6 +4366,26 @@
       + `</td></tr></tbody></table></td></tr>`;
   }
 
+  // The compact catalogue body — a slim accent-dotted category divider over one
+  // sigItemCard per item, grouped by category. Shared so the profile signature
+  // and (opt-in, #34) the bazaar advert render the SAME markup from the SAME
+  // selected set. Rows are `colspan="2"` so they span both the signature's and
+  // the bazaar's single-column body table. Pure — exposed via __RwthPure.
+  function sigCatalogueRows(items, t) {
+    const rows = [];
+    for (const group of groupByCategory(items)) {
+      const accent = categoryAccent(group.category, t);
+      // Category divider — accent-dotted label over a hairline.
+      rows.push(`<tr><td colspan="2" style="background: ${t.bg}; padding: 11px 14px 4px; border: 0;">`
+        + `<span style="color: ${accent}; font-size: 9px; font-weight: bold; letter-spacing: 0.24em; `
+        + `text-transform: uppercase;">&#9679;&nbsp; ${escapeAttr(group.category)}</span>`
+        + `<div style="height: 1px; background: ${t.hairline}; margin-top: 5px; font-size: 0; `
+        + `line-height: 0;">&nbsp;</div></td></tr>`);
+      for (const it of group.items) rows.push(sigItemCard(it, accent, t));
+    }
+    return rows;
+  }
+
   const AdvertiseGenerator = {
     // Output — full forum post HTML. Item-driven from the selected `listed`
     // rows + Recent Transactions; cards grouped under category dividers.
@@ -4424,10 +4460,11 @@
     // Output — bazaar description HTML. The bazaar page lists stock natively, so
     // this is brand/about copy only. When a banner is set it carries the brand;
     // a redundant wordmark is deliberately omitted in that case.
-    toBazaarHtml(settings) {
+    toBazaarHtml(items, settings) {
       const s = settings || {};
-      const { identity, theme: t, images } = AdvConfig.resolve(s);
+      const { identity, theme: t, images, bazaarShowItems } = AdvConfig.resolve(s);
       const { shopName, tagline } = identity;
+      const catalogue = items || [];
       const banner = images.bazaar;
       const rows = [];
       if (banner) {
@@ -4448,6 +4485,18 @@
         + `<span style="color: ${t.textBody}; font-size: 13px;">`
         + `RW Gear &mdash; top tier weapons/bonuses, priced fair and rotating constantly.</span></td></tr>`);
       rows.push(forumRule(t));
+      // #34 — opt-in RW-item catalogue (default OFF ⇒ this whole block is absent
+      // and the output is byte-for-byte unchanged). When on, render the SHARED
+      // selected set with the SAME markup the signature uses — the compact
+      // sigItemCard catalogue, never the forum's heavy image cards — under an
+      // "Also available — RW gear" divider.
+      if (bazaarShowItems && catalogue.length) {
+        rows.push(`<tr><td colspan="2" style="background: ${t.bg}; padding: 14px 24px 2px; text-align: center; border: 0;">`
+          + `<span style="color: ${t.accent}; font-size: 10px; font-weight: bold; letter-spacing: 0.3em; `
+          + `text-transform: uppercase;">&#9679;&nbsp; Also available &mdash; RW gear</span></td></tr>`);
+        for (const r of sigCatalogueRows(catalogue, t)) rows.push(r);
+        rows.push(forumRule(t));
+      }
       rows.push(`<tr><td style="background: ${t.bg}; padding: 13px 24px 12px; text-align: center; border: 0;">`
         + `<span style="color: ${t.textSoft}; font-size: 12px; font-style: italic;">`
         + `Check Display Case or send me a message if you don't see an advertised item`
@@ -4498,16 +4547,8 @@
           + `text-align: center; border: 0;">`
           + `<span style="color: ${t.textMuted}; font-size: 10px;">${escapeAttr(availability)}</span></td></tr>`);
       }
-      for (const group of groupByCategory(items)) {
-        const accent = categoryAccent(group.category, t);
-        // Category divider — accent-dotted label over a hairline.
-        bodyRows.push(`<tr><td colspan="2" style="background: ${t.bg}; padding: 11px 14px 4px; border: 0;">`
-          + `<span style="color: ${accent}; font-size: 9px; font-weight: bold; letter-spacing: 0.24em; `
-          + `text-transform: uppercase;">&#9679;&nbsp; ${escapeAttr(group.category)}</span>`
-          + `<div style="height: 1px; background: ${t.hairline}; margin-top: 5px; font-size: 0; `
-          + `line-height: 0;">&nbsp;</div></td></tr>`);
-        for (const it of group.items) bodyRows.push(sigItemCard(it, accent, t));
-      }
+      // Category-grouped catalogue body (shared with the bazaar advert, #34).
+      for (const r of sigCatalogueRows(items, t)) bodyRows.push(r);
       // Foot — a link strip. Forum / Pricelist / Bazaar, dot-separated.
       const sigLink = (href, label) =>
         `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" `
@@ -4731,6 +4772,121 @@
             </div>`;
   }
 
+  // #32 — per-surface picture-override descriptors, keyed by the active surface.
+  // The picture is the one genuinely per-surface control, so it surfaces from a
+  // gear on the Copy-to-Torn surface switcher rather than the retired Brand & look
+  // "advanced" collapse. Each override wins for its surface; blank falls back to
+  // the shared banner (see AdvConfig.resolve → surfaceImage).
+  const ADV_SURFACE_IMAGE_FIELDS = {
+    forum:     { key: 'forumImageUrl',     label: 'Forum picture override',
+                 help: 'Optional. A different picture for your forum post. Blank uses the shop banner.' },
+    bazaar:    { key: 'bazaarImageUrl',    label: 'Bazaar picture override',
+                 help: 'Optional. A different picture for your bazaar advert. Blank uses the shop banner.' },
+    signature: { key: 'signatureImageUrl', label: 'Signature picture override',
+                 help: 'Optional. A different picture for your signature. Blank uses the shop banner.' },
+  };
+
+  // The picture-override field descriptor for a surface (unknown key → forum).
+  // Pure — exposed via __RwthPure for the Node test seam (ADR-0002).
+  function advSurfaceImageField(surface) {
+    return ADV_SURFACE_IMAGE_FIELDS[surface] || ADV_SURFACE_IMAGE_FIELDS.forum;
+  }
+
+  // #33 — the four forum copy blocks (sub-banner, intro, also-rotating note, footer
+  // tagline). ONLY the forum surface renders these (toForumHtml consumes them), so
+  // they live inside the forum gear. They remain single shared stored values: each
+  // input binds to MEM.settings via data-adv-copy, persisting through the same path
+  // as the retired Post-text accordion — the gear changes WHICH controls show, never
+  // the stored values. Pure — exposed via __RwthPure.
+  function buildAdvCopyFields(copy) {
+    const c = copy || {};
+    const g = (k) => escapeAttr(c[k] == null ? '' : String(c[k]));
+    return `<div class="rwth-form-title">Post copy</div>
+        <span class="rwth-field-help">Clear a field to hide that part of the forum post.</span>
+        <label class="rwth-field">
+          <span class="rwth-field-label">Sub-banner</span>
+          <input class="rwth-field-input" type="text" data-adv-copy="subBanner"
+                 value="${g('subBanner')}"
+                 autocomplete="off" spellcheck="false">
+        </label>
+        <label class="rwth-field">
+          <span class="rwth-field-label">Intro</span>
+          <textarea class="rwth-field-input" rows="2" data-adv-copy="intro"
+                    style="width:100%;font-family:inherit;"
+                    spellcheck="false">${g('intro')}</textarea>
+        </label>
+        <label class="rwth-field">
+          <span class="rwth-field-label">Also-rotating note</span>
+          <input class="rwth-field-input" type="text" data-adv-copy="alsoRotating"
+                 value="${g('alsoRotating')}"
+                 autocomplete="off" spellcheck="false">
+        </label>
+        <label class="rwth-field">
+          <span class="rwth-field-label">Footer tagline</span>
+          <input class="rwth-field-input" type="text" data-adv-copy="footerTagline"
+                 value="${g('footerTagline')}"
+                 autocomplete="off" spellcheck="false">
+        </label>`;
+  }
+
+  // The surface-switcher gear button + its caret popover. The popover adapts to the
+  // active surface, showing ONLY the controls that surface consumes (#33): the forum
+  // gear carries the four copy blocks (above) plus the forum picture override, while
+  // bazaar/signature carry just their picture override (signature is thin by design).
+  // "Adapt per output" is purely about which controls render — the stored values are
+  // shared. The picture URL input binds to MEM.settings via data-setting, so an edit
+  // persists through the normal persistSettingField path with no save button. The
+  // gear shows a filled ● when a picture is set, and a pressed/open state while the
+  // popover is up. Click-toggled open/close is wired in the impure render layer
+  // (toggle-adv-gear) — never :hover, which reintroduced the mobile tap-stick bug
+  // (v0.3.194). Pure — exposed via __RwthPure.
+  function buildAdvSurfaceGear(surface, settings, open, copy) {
+    const field = advSurfaceImageField(surface);
+    const raw = settings ? settings[field.key] : '';
+    const val = raw == null ? '' : String(raw);
+    const hasImg = !!val.trim();
+    const bannerRaw = settings ? settings.bannerImageUrl : '';
+    const hasBanner = !!String(bannerRaw == null ? '' : bannerRaw).trim();
+    const fallbackNote = hasImg ? '' : `<span class="rwth-field-help">${
+      hasBanner ? 'Blank — using the shared shop banner.'
+                : 'Blank — no picture on this surface yet.'}</span>`;
+    // Only the forum surface consumes the copy blocks; bazaar/signature gears stay
+    // just their picture override (signature intentionally thin — no filler).
+    const copyFields = surface === 'forum' ? buildAdvCopyFields(copy) : '';
+    const imageField = `<span class="rwth-field-label">${field.label}</span>
+          <input class="rwth-field-input" type="url" data-setting="${escapeAttr(field.key)}"
+                 value="${escapeAttr(val)}" placeholder="https://..."
+                 autocomplete="off" spellcheck="false">
+          ${fallbackNote}
+          <span class="rwth-field-help">${field.help}</span>`;
+    // #34 — bazaar gear only: an opt-in toggle that lists the shared selected RW
+    // items on the advert as the compact signature-card catalogue. Default off;
+    // uses data-adv-bazaar-items (NOT data-setting) so it commits on `change`
+    // through syncAdvertiseEdit, and so the thin signature gear's bound-control
+    // count is untouched.
+    const bazaarItemsField = surface === 'bazaar'
+      ? `<label class="rwth-intel-check" style="margin-top: 8px;">
+          <input type="checkbox" data-adv-bazaar-items${
+            settings && settings.bazaarShowItems === true ? ' checked' : ''}>
+          Show my RW items on this advert
+        </label>`
+      : '';
+    const pop = open
+      ? `<div class="rwth-adv-gear-pop">
+          ${copyFields}
+          ${imageField}
+          ${bazaarItemsField}
+        </div>`
+      : '';
+    return `<div class="rwth-adv-gear">
+        <button class="rwth-gear-btn${open ? ' is-open' : ''}${hasImg ? ' has-img' : ''}" type="button"
+                data-action="toggle-adv-gear" aria-expanded="${open ? 'true' : 'false'}"
+                aria-label="Settings for this surface" title="Settings for this surface">⚙${
+          hasImg ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
+        ${pop}
+      </div>`;
+  }
+
   function buildAdvertiseTab(mem) {
     const A = (mem && mem.advertise) || {};
     const L = (mem && mem.ledger) || {};
@@ -4778,14 +4934,8 @@
     const bannerField = { type: 'image', key: 'bannerImageUrl', label: 'Shop banner picture',
       placeholder: 'https://...',
       help: 'One picture shown across the top of your forum post, bazaar advert, and signature.' };
-    const surfaceImgFields = [
-      { type: 'image', key: 'forumImageUrl', label: 'Forum picture override', placeholder: 'https://...',
-        help: 'Optional. A different picture for your forum post. Blank uses the shop banner.' },
-      { type: 'image', key: 'bazaarImageUrl', label: 'Bazaar picture override', placeholder: 'https://...',
-        help: 'Optional. A different picture for your bazaar advert. Blank uses the shop banner.' },
-      { type: 'image', key: 'signatureImageUrl', label: 'Signature picture override', placeholder: 'https://...',
-        help: 'Optional. A different picture for your signature. Blank uses the shop banner.' },
-    ];
+    // #32 — the per-surface picture overrides moved out of the Brand & look
+    // "advanced" collapse and onto the surface-switcher gear (buildAdvSurfaceGear).
     const itemRows = listed.length
       ? listed.map(i => buildAdvItemRow(i, isChecked(i), A.imgEditId === i.id, markup, mugFrac)).join('')
       : `<div class="rwth-placeholder">No listed items yet.</div>`;
@@ -4815,7 +4965,7 @@
       ? ui.advSurface : 'forum';
     const showSurfaceRaw = !!ui.advSurfaceRaw;
     const renderSurface = (st) =>
-      activeSurface === 'bazaar' ? AdvertiseGenerator.toBazaarHtml(st)
+      activeSurface === 'bazaar' ? AdvertiseGenerator.toBazaarHtml(selectedItems, st)
       : activeSurface === 'signature' ? AdvertiseGenerator.toSignatureHtml(selectedItems, st)
       : AdvertiseGenerator.toForumHtml(selectedItems, transactions, st);
 
@@ -4847,8 +4997,11 @@
         ${mugMarkupField}
         ${itemRows}`;
 
-    // Brand & look — set-once identity, links, theme/colours and pictures.
-    const brandBody = `
+    // Store & brand — the universal edit-once layer (#31/S1). Consolidates the
+    // fields shared across every surface: identity, links, theme/colours, the
+    // shared banner picture, and where-buyers-find-you (locations + availability
+    // override, which feeds both the forum and signature availability lines).
+    const storeBody = `
         <div class="rwth-form-title">Your shop</div>
         <label class="rwth-field">
           <span class="rwth-field-label">Your shop name</span>
@@ -4904,37 +5057,6 @@
         </div>
         <div class="rwth-form-title">Pictures</div>
         ${renderSettingField(bannerField, settings, intel, ui)}
-        ${collapseHead('Per-surface picture overrides (advanced)', 'advImagesAdv', fold.advImagesAdv)}
-        ${fold.advImagesAdv ? '' : surfaceImgFields.map(f => renderSettingField(f, settings, intel, ui)).join('')}`;
-
-    // Post text — the flavour copy and the where-to-find-you location checkboxes.
-    const postBody = `
-        <div class="rwth-form-title">Post copy</div>
-        <span class="rwth-field-help">Clear a field to hide that part of the forum post.</span>
-        <label class="rwth-field">
-          <span class="rwth-field-label">Sub-banner</span>
-          <input class="rwth-field-input" type="text" data-adv-copy="subBanner"
-                 value="${escapeAttr(copy.subBanner)}"
-                 autocomplete="off" spellcheck="false">
-        </label>
-        <label class="rwth-field">
-          <span class="rwth-field-label">Intro</span>
-          <textarea class="rwth-field-input" rows="2" data-adv-copy="intro"
-                    style="width:100%;font-family:inherit;"
-                    spellcheck="false">${escapeAttr(copy.intro)}</textarea>
-        </label>
-        <label class="rwth-field">
-          <span class="rwth-field-label">Also-rotating note</span>
-          <input class="rwth-field-input" type="text" data-adv-copy="alsoRotating"
-                 value="${escapeAttr(copy.alsoRotating)}"
-                 autocomplete="off" spellcheck="false">
-        </label>
-        <label class="rwth-field">
-          <span class="rwth-field-label">Footer tagline</span>
-          <input class="rwth-field-input" type="text" data-adv-copy="footerTagline"
-                 value="${escapeAttr(copy.footerTagline)}"
-                 autocomplete="off" spellcheck="false">
-        </label>
         <div class="rwth-form-title">Where buyers find &amp; pay you</div>
         <span class="rwth-field-help">Tick where you sell — the post writes one line covering all of it. Ticking a box never changes your prices; the markup toggle in &ldquo;Items to advertise&rdquo; does that.</span>
         ${ADV_LOCATIONS.map(l => `
@@ -4949,6 +5071,15 @@
                  placeholder="${escapeAttr(resolved.availability || 'Composed from the boxes above')}"
                  autocomplete="off" spellcheck="false">
         </label>`;
+
+    // #32 — Brand & look retired. Its shared fields (identity/links/theme/colours/
+    // banner) moved to Store & brand (#31/S1); the per-surface picture overrides —
+    // its last remaining content — moved onto the surface-switcher gear here in S2.
+
+    // #33 — the four forum copy blocks moved OUT of the retired Post-text accordion
+    // and INTO the forum gear popover (buildAdvCopyFields, rendered by
+    // buildAdvSurfaceGear only for the forum surface). They stay shared stored
+    // values consumed by toForumHtml; only the forum surface renders them.
 
     // Recent transactions — optional social-proof block with its own in-post toggle.
     const txBody = `
@@ -4990,9 +5121,16 @@
         : `<textarea id="rwth-out-surface" hidden>${escapeAttr(activeHtml)}</textarea>
          <div class="rwth-adv-preview">${activePreview}</div>
          <span class="rwth-adv-preview-note">Approximate &mdash; final look set by Torn</span>`;
+      // #32 — the gear hangs off the segmented switcher and opens a caret popover
+      // carrying the ACTIVE surface's picture override. It re-adapts as the switcher
+      // changes because it reads activeSurface on every render.
+      const surfaceGear = buildAdvSurfaceGear(activeSurface, settings, !!ui.advSurfaceGearOpen, copy);
       const surfaceSwitcher = `
         <div class="rwth-output-head">
-          <div class="rwth-filters">${segBtns}</div>
+          <div class="rwth-adv-surface-switch">
+            <div class="rwth-filters">${segBtns}</div>
+            ${surfaceGear}
+          </div>
           <div class="rwth-adv-surface-actions">
             <button class="rwth-btn-sm" type="button" data-action="copy-output"
                     data-copy-target="rwth-out-surface">Copy HTML</button>
@@ -5021,12 +5159,8 @@
         ${outputsBody}
       </div>
       <div class="rwth-adv-section">
-        ${collapseHead('Brand & look', 'brandLook', fold.brandLook)}
-        ${fold.brandLook ? '' : brandBody}
-      </div>
-      <div class="rwth-adv-section">
-        ${collapseHead('Post text', 'postText', fold.postText)}
-        ${fold.postText ? '' : postBody}
+        ${collapseHead('Store & brand', 'storeBrand', fold.storeBrand)}
+        ${fold.storeBrand ? '' : storeBody}
       </div>
       <div class="rwth-adv-section">
         ${collapseHead('Recent transactions', 'advTx', fold.advTx)}
@@ -5150,9 +5284,10 @@
         case 'remove-tx':     removeTransaction(id); break;
         case 'promote-tx':    promoteTransaction(id); break;
         case 'copy-output':   copyOutput(actionEl.dataset.copyTarget); break;
-        case 'set-adv-surface': setState({ ui: { ...MEM.ui,
+        case 'set-adv-surface': flushAdvGearInput(); setState({ ui: { ...MEM.ui,
                                 advSurface: actionEl.dataset.surface, advSurfaceRaw: false } }); break;
         case 'toggle-adv-raw':  setState({ ui: { ...MEM.ui, advSurfaceRaw: !MEM.ui.advSurfaceRaw } }); break;
+        case 'toggle-adv-gear': toggleAdvGear(); break;
         case 'toggle-img':    setState({ advertise: { ...MEM.advertise,
                                 imgEditId: MEM.advertise.imgEditId === id ? null : id } }); break;
         case 'close-img':     setState({ advertise: { ...MEM.advertise, imgEditId: null } }); break;
@@ -5230,6 +5365,15 @@
     // re-renders so the per-item item-market hint grosses up to also cover a mug.
     if (e.target.matches && e.target.matches('[data-adv-mug]')) {
       MEM.settings = { ...MEM.settings, mugMarkup: e.target.checked };
+      Store.set('rwth_settings', MEM.settings);
+      render();
+      return;
+    }
+    // #34 — the bazaar gear's "show my RW items" toggle persists to rwth_settings
+    // and re-renders so the bazaar advert gains/loses the compact item catalogue.
+    // Default off, so an untouched install's bazaar output is unchanged.
+    if (e.target.matches && e.target.matches('[data-adv-bazaar-items]')) {
+      MEM.settings = { ...MEM.settings, bazaarShowItems: e.target.checked };
       Store.set('rwth_settings', MEM.settings);
       render();
       return;
@@ -5613,6 +5757,35 @@
     }
     const next = (key && key !== open) ? key : null;
     setState({ ui: { ...MEM.ui, settingsImgEdit: next } });
+  }
+
+  // #32/#33 — snapshot every editable field in the open surface-switcher gear
+  // popover into rwth_settings before it re-renders away (on close, or when the
+  // switcher changes surface), so an in-progress edit is never dropped. Covers both
+  // the picture-override URL input (data-setting) and — on the forum gear — the four
+  // copy-block inputs/textarea (data-adv-copy). Each input's `change` already
+  // persists on blur; this is the belt-and-braces flush for the case where the click
+  // lands before a blur fires. Both keys write straight to MEM.settings by name.
+  function flushAdvGearInput() {
+    if (!MEM.ui.advSurfaceGearOpen) return;
+    const els = document.querySelectorAll(
+      '#rwth-content .rwth-adv-gear-pop [data-setting], #rwth-content .rwth-adv-gear-pop [data-adv-copy]');
+    if (!els || !els.length) return;
+    let settings = MEM.settings;
+    els.forEach(el => {
+      const key = el.dataset.setting || el.dataset.advCopy;
+      if (key) settings = { ...settings, [key]: el.value };
+    });
+    Store.set('rwth_settings', settings);
+    MEM.settings = settings;
+  }
+
+  // #32 — click-toggle the surface-switcher gear popover. Flush any in-progress
+  // edit first, then flip the open flag through setState (sole mutation path). The
+  // popover always tracks the active surface, so no per-surface key is needed.
+  function toggleAdvGear() {
+    flushAdvGearInput();
+    setState({ ui: { ...MEM.ui, advSurfaceGearOpen: !MEM.ui.advSurfaceGearOpen } });
   }
 
   // #341 — the ledger sort select changed; validate, persist, re-render so the
@@ -7953,6 +8126,39 @@
       /* #325 — surface switcher: stacks the head, preview/textarea, and note. */
       .rwth-adv-surface { display: flex; flex-direction: column; gap: var(--rwth-gap-sm); }
       .rwth-adv-surface-actions { display: flex; gap: 4px; }
+      /* #32 — the segmented control + its picture gear share a left group so the
+         gear "hangs off" the switcher; the gear anchors its own caret popover. */
+      .rwth-adv-surface-switch { display: flex; align-items: center; gap: 6px; }
+      .rwth-adv-gear { position: relative; display: inline-flex; }
+      .rwth-gear-btn {
+        display: inline-flex; align-items: center; gap: 3px; cursor: pointer;
+        background: transparent; color: var(--rwth-muted);
+        border: 1px solid var(--rwth-border-strong); border-radius: var(--rwth-radius-ctl);
+        padding: 3px 7px; font: 12px var(--rwth-font-mono); line-height: 1;
+      }
+      .rwth-gear-btn:hover { color: var(--rwth-text); border-color: var(--rwth-secondary-strong); }
+      .rwth-gear-btn.has-img { color: var(--rwth-accent); border-color: var(--rwth-accent); }
+      .rwth-gear-dot { font-size: 8px; }
+      /* Confident pressed/open state: filled chip + accent ring, held while open. */
+      .rwth-gear-btn.is-open {
+        color: #0c1422; background: var(--rwth-accent); border-color: var(--rwth-accent);
+        box-shadow: inset 0 0 0 1px #0006;
+      }
+      .rwth-adv-gear-pop {
+        position: absolute; top: calc(100% + 7px); left: 0; z-index: 6; width: 230px;
+        display: flex; flex-direction: column; gap: var(--rwth-gap-sm);
+        background: #0c1422; border: 1px solid var(--rwth-secondary-strong);
+        border-radius: var(--rwth-radius-ctl); padding: var(--rwth-gap-sm); box-shadow: 0 4px 12px #000a;
+        /* #33 — the forum gear now carries the four copy blocks + a picture field,
+           so cap the popover and scroll it rather than overrun the viewport. */
+        max-height: min(60vh, 420px); overflow-y: auto;
+      }
+      /* Caret pointing up at the gear — a rotated square straddling the top edge. */
+      .rwth-adv-gear-pop::before {
+        content: ''; position: absolute; top: -5px; left: 12px; width: 9px; height: 9px;
+        background: #0c1422; border-left: 1px solid var(--rwth-secondary-strong);
+        border-top: 1px solid var(--rwth-secondary-strong); transform: rotate(45deg);
+      }
       .rwth-adv-preview {
         border-radius: var(--rwth-radius-ctl); overflow: hidden; pointer-events: none;
       }
@@ -11547,6 +11753,9 @@
     SORT_OPTIONS,
     ChartGeom,
     buildAdvertiseTab,
+    advSurfaceImageField,
+    buildAdvCopyFields,
+    buildAdvSurfaceGear,
     buildSettingsTab,
     buildScanChecklist,
     buildSellBox,
@@ -11586,6 +11795,7 @@
     ADV_SWATCH_PALETTE,
     AvailabilityLine,
     AdvertiseGenerator,
+    sigCatalogueRows,
     itemMarketListPrice,
     BonusTrashGuard,
     resolveMarketAnchor,
