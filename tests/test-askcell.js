@@ -93,7 +93,7 @@ console.log('\nsold ask cell (plain)');
       buyTimestamp: NOW - 5 * DAY, soldTimestamp: NOW },
     NOW);
   const html = askCellV(m, 'x5');
-  assert('compact value (175m, no $)', /175m/.test(html) && !/\$175m/.test(html));
+  assert('compact money value ($175m)', /\$175m/.test(html));
   assert('not an editable input', !/data-ask-edit/.test(html));
 }
 

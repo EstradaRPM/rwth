@@ -465,7 +465,7 @@ test('buildLedgerTab shows ROI in a sold row collapsed line', () => {
   assert.match(html, /\+\$300,000/);
 });
 
-test('#28/D5 — BUY/ASK/ROI align on a bare unit under the shared column track', () => {
+test('#28/D5 — BUY/ASK/ROI align under the shared column track', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
   const listed = { ...heldItem, id: 'd5', status: 'listed',
     buyPrice: 100000000, listPrice: 175000000 };
@@ -477,12 +477,9 @@ test('#28/D5 — BUY/ASK/ROI align on a bare unit under the shared column track'
   assert.match(html, /<span class="rwth-th">buy<\/span>/);
   assert.match(html, /<span class="rwth-th">ask<\/span>/);
   assert.match(html, /<span class="rwth-th">roi<\/span>/);
-  // BUY renders as a bare compact unit (no repeated $). ASK's inline input carries
-  // a $ ($175m) so an editable price reads distinctly from the static figure cells.
-  assert.match(html, /class="rwth-cell-v">100m<\/span>/);
+  // BUY renders as compact money ($100m); ASK's inline input carries the same $-form.
+  assert.match(html, /class="rwth-cell-v">\$100m<\/span>/);
   assert.match(html, /value="\$175m"/);
-  // No $-prefixed compact figure leaks into the static aligned figure cells' text.
-  assert.doesNotMatch(html, /rwth-cell-v[^>]*>\$\d/);
 });
 
 test('sold tab: net→"sold" proceeds column plus a true P/L column', () => {
@@ -496,18 +493,18 @@ test('sold tab: net→"sold" proceeds column plus a true P/L column', () => {
   assert.match(html, /<span class="rwth-th">P\/L<\/span>/);
   // The old NET header label is gone.
   assert.doesNotMatch(html, /<span class="rwth-th">net<\/span>/);
-  // Proceeds cell shows saleNet as a bare compact unit; P/L cell shows the
-  // signed profit coloured with the ROI win token.
-  assert.match(html, /class="rwth-cell-v">900k<\/span>/);
-  assert.match(html, /class="rwth-cell-v rwth-roi-pos">\+300k<\/span>/);
+  // Proceeds cell shows saleNet as compact money; P/L cell shows the signed
+  // profit coloured with the ROI win token.
+  assert.match(html, /class="rwth-cell-v">\$900k<\/span>/);
+  assert.match(html, /class="rwth-cell-v rwth-roi-pos">\+\$300k<\/span>/);
 });
 
 test('sold tab: P/L cell goes red and signed on a realized loss', () => {
   const { buildLedgerTab } = globalThis.__RwthPure;
   const loss = { ...soldItem, id: 'loss', buyPrice: 600000, saleNet: 400000 };
   const html = buildLedgerTab({ ledger: { items: [loss], statusFilter: 'sold' } });
-  assert.match(html, /class="rwth-cell-v">400k<\/span>/);           // proceeds
-  assert.match(html, /class="rwth-cell-v rwth-roi-neg">-200k<\/span>/); // P/L loss
+  assert.match(html, /class="rwth-cell-v">\$400k<\/span>/);           // proceeds
+  assert.match(html, /class="rwth-cell-v rwth-roi-neg">-\$200k<\/span>/); // P/L loss
 });
 
 test('sold tab: null saleNet dims both the sold and P/L cells', () => {

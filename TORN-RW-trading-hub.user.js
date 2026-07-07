@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.210
+// @version      0.3.211
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.210';
+  const SCRIPT_VERSION = '0.3.211';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1876,10 +1876,10 @@
     if (abs >= 1_000) return `${sign}$${round1(abs / 1_000)}k`;
     return `${sign}$${Math.round(abs).toLocaleString('en-US')}`;
   }
-  // #28/D5 — same compact money without the repeated `$`, so the figure cells
-  // (buy/ask/sold/P·L) align on a bare numeric unit down each right-aligned track
-  // (the column header already carries the label). Keeps the k/m/b suffix and
-  // the leading sign; only the currency glyph is dropped.
+  // Compact money without the currency glyph — keeps the k/m/b suffix and the
+  // leading sign, drops only the `$`. The ledger figure cells (buy/ask/sold/P·L)
+  // now carry the `$` via fmtCompactMoney; this stays for any bare-unit need and
+  // for the test seam.
   function fmtCompactNum(n) {
     return fmtCompactMoney(n).replace('$', '');
   }
@@ -2119,7 +2119,7 @@
         + `<input class="rwth-ask-edit" type="text" inputmode="text" data-ask-edit data-row-ctl`
         + ` data-id="${escapeAttr(id)}" data-raw="${escapeAttr(raw)}" value="${escapeAttr(disp)}" aria-label="ask price"></span>`;
     }
-    return valCell(m.ask == null ? null : fmtCompactNum(m.ask));
+    return valCell(m.ask == null ? null : fmtCompactMoney(m.ask));
   }
 
   // The ROI cell, rendered so hope never reads like banked money: a projected
@@ -2138,15 +2138,15 @@
   }
 
   // The realized dollar P/L cell for a sold row: saleNet − buy, banked money in
-  // the same compact bare unit as buy/sold, signed (+ prefixed when ≥0; the
-  // formatter already carries the − for losses) and colored with the SAME
+  // the same compact money unit as buy/sold ($80m), signed (+ prefixed when ≥0; the
+  // formatter already carries the −$ for losses) and colored with the SAME
   // pos/neg tokens the ROI cell uses so a win/loss reads one way everywhere. A
   // missing net leg renders the dimmed em-dash like any not-set leg. buy is
   // treated as 0 when absent, matching the biggestPl sort's rowPl (#341).
   function plCellV(m) {
     if (m.net == null) return valCell(null);
     const pl = m.net - (m.buy || 0);
-    const body = (pl >= 0 ? '+' : '') + fmtCompactNum(pl);
+    const body = (pl >= 0 ? '+' : '') + fmtCompactMoney(pl);
     return valCell(body, pl >= 0 ? 'rwth-roi-pos' : 'rwth-roi-neg');
   }
 
@@ -2161,15 +2161,15 @@
     const cols = COLUMN_SETS[status] || COLUMN_SETS.all;
     return cols.map(col => {
       switch (col) {
-        case 'buy': return valCell(m.buy == null ? null : fmtCompactNum(m.buy));
+        case 'buy': return valCell(m.buy == null ? null : fmtCompactMoney(m.buy));
         case 'ask': return askCellV(m, id);
         // 'sold' = net-of-fees proceeds (saleNet); 'pl' = realized dollar
         // profit/loss (saleNet − buy), signed and P/L-colored (reusing the ROI
         // win/loss classes). Both key off the same saleNet leg, so a null net
         // renders the dimmed em-dash for both (like any not-set leg).
-        case 'sold': return valCell(m.net == null ? null : fmtCompactNum(m.net));
+        case 'sold': return valCell(m.net == null ? null : fmtCompactMoney(m.net));
         case 'pl': return plCellV(m);
-        case 'net': return valCell(m.net == null ? null : fmtCompactNum(m.net));
+        case 'net': return valCell(m.net == null ? null : fmtCompactMoney(m.net));
         case 'roi': return roiCellV(m);
         case 'age': return valCell(m.age == null ? null : m.age + 'd', ageCls);
         default:    return valCell(null);
