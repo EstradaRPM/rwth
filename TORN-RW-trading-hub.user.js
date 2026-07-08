@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.214
+// @version      0.3.215
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.214';
+  const SCRIPT_VERSION = '0.3.215';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -5161,16 +5161,19 @@
     // values consumed by toForumHtml; only the forum surface renders them.
 
     // Recent transactions — optional social-proof block. Its in-post toggles
-    // (show/hide + compact spacing) now hang off a caret gear at the top of the
+    // (show/hide + compact spacing) hang off a caret gear at the top of the
     // section (#337), rather than trailing the (potentially long) tx list.
+    // #338 — the head reuses the Copy-to-Torn action-row shape exactly
+    // (rwth-output-head: gear on the left, action button on the right) so the two
+    // Advertise sections read as one system. Gear-left also lets its caret popover
+    // open into the panel width instead of clipping off the right edge, and the
+    // relocated "+ add" fills what was dead space beside a lone right-aligned gear.
     const txBody = `
-        <div class="rwth-adv-tx-head">
+        <div class="rwth-output-head rwth-adv-tx-head">
           ${buildAdvTxGear(sections, !!ui.advTxGearOpen)}
+          <button class="rwth-btn-sm" type="button" data-action="add-tx">+ add transaction</button>
         </div>
-        ${txRows}
-        <div class="rwth-form-actions">
-          <button class="rwth-btn rwth-btn-add" type="button" data-action="add-tx">+ add transaction</button>
-        </div>`;
+        ${txRows}`;
 
     // The whole Copy-to-Torn body — text strip + surface switcher — is built
     // only while its section is unfolded, so a folded section costs zero
@@ -7703,7 +7706,13 @@
       /* #19 — the ⚙ scan-settings popup reuses the projection-pop shell; its
          relocated sellbox drops its own border so it reads as one panel. */
       .rwth-scan-settings .rwth-sellbox { border: 0; padding: 0; }
-      /* The ⚙ gear tracks the scan-settings popup: cyan when closed, green while
+      /* #338 — DELIBERATE exception to the labelled-chip gear standard
+         (.rwth-gear-btn, used by both Advertise section gears). This gear is a
+         member of the Ledger's Refresh action cluster, so it stays an icon-only
+         ghost button that mirrors ⟳ Refresh beside it — signalling "this wheel is
+         the Refresh system's settings", not a section gear. If a zero-exception
+         rule is ever wanted, swap it onto .rwth-gear-btn here.
+         The ⚙ gear tracks the scan-settings popup: cyan when closed, green while
          open (aria-expanded) — a persistent "settings are open" tell. The shared
          ghost :hover greens it, so for the gear we override that and re-gate the
          green to real pointers: a tap on mobile no longer leaves the gear stuck
@@ -8280,9 +8289,11 @@
       /* #32 — the gear anchors its own caret popover; it now sits on the switcher's
          action row rather than hanging off the (previously wrapping) tab group. */
       .rwth-adv-gear { position: relative; display: inline-flex; }
-      /* #337 — Recent Transactions options gear sits top-right of the section so
-         its toggles no longer trail the list. */
-      .rwth-adv-tx-head { display: flex; justify-content: flex-end; margin-bottom: var(--rwth-gap-sm); }
+      /* #337/#338 — Recent Transactions head. Layout (flex, space-between,
+         align-items:center) comes from the shared .rwth-output-head so it matches
+         the Copy-to-Torn action row exactly; the gear sits left (popover opens
+         into the panel, no clip) with "+ add transaction" on the right. */
+      .rwth-adv-tx-head { margin-bottom: var(--rwth-gap-sm); }
       .rwth-gear-label { text-transform: uppercase; letter-spacing: .3px; font-size: 10px; }
       .rwth-gear-btn {
         display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
