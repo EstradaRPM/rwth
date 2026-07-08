@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.215
+// @version      0.3.216
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.215';
+  const SCRIPT_VERSION = '0.3.216';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -853,9 +853,12 @@
   // ─── Pure HTML builders (exposed via __RwthPure — ADR-0002) ──────────────────
   // A collapsible-section header — a full-width button carrying the section
   // title and a caret. `key` indexes MEM.ui.collapsed; the click is handled by
-  // the delegated `toggle-collapse` action.
-  function collapseHead(label, key, collapsed) {
-    return `<button class="rwth-collapse-head" type="button" `
+  // the delegated `toggle-collapse` action. `bleed` opts the top-level tab/settings
+  // sections into a full-bleed band that runs edge-to-edge of the panel (via the
+  // `--bleed` modifier); nested sub-collapses omit it and stay inset in their card.
+  function collapseHead(label, key, collapsed, bleed) {
+    const cls = bleed ? 'rwth-collapse-head rwth-collapse-head--bleed' : 'rwth-collapse-head';
+    return `<button class="${cls}" type="button" `
       + `data-action="toggle-collapse" data-collapse="${key}">`
       + `<span class="rwth-form-title">${label}</span>`
       + `<span class="rwth-collapse-caret">${collapsed ? '▸' : '▾'}</span></button>`;
@@ -3997,7 +4000,7 @@
         `<div class="rwth-settings-section-body">${
           sec.fields.map(f => renderSettingField(f, s, intel, ui)).join('')}</div>`;
       return `<div class="rwth-settings-section">${
-        collapseHead(sec.title, sec.key, collapsed)}${body}</div>`;
+        collapseHead(sec.title, sec.key, collapsed, true)}${body}</div>`;
     }).join('');
     return `<div class="rwth-settings">
       ${sections}
@@ -5236,19 +5239,19 @@
     return `<div class="rwth-advertise">
       <div class="rwth-adv-section">
         ${collapseHead(`Items to advertise${listed.length ? ` (${listed.length})` : ''}`,
-                       'advItems', fold.advItems)}
+                       'advItems', fold.advItems, true)}
         ${fold.advItems ? '' : itemsBody}
       </div>
       <div class="rwth-adv-section">
-        ${collapseHead('Copy to Torn', 'advOutputs', fold.advOutputs)}
+        ${collapseHead('Copy to Torn', 'advOutputs', fold.advOutputs, true)}
         ${outputsBody}
       </div>
       <div class="rwth-adv-section">
-        ${collapseHead('Store & brand', 'storeBrand', fold.storeBrand)}
+        ${collapseHead('Store & brand', 'storeBrand', fold.storeBrand, true)}
         ${fold.storeBrand ? '' : storeBody}
       </div>
       <div class="rwth-adv-section">
-        ${collapseHead('Recent transactions', 'advTx', fold.advTx)}
+        ${collapseHead('Recent transactions', 'advTx', fold.advTx, true)}
         ${fold.advTx ? '' : txBody}
       </div>
     </div>`;
@@ -7877,6 +7880,17 @@
         border-radius: var(--rwth-radius-card); cursor: pointer; text-align: left;
       }
       .rwth-collapse-head:hover { background: var(--rwth-fill-hover); border-color: var(--rwth-border); }
+      /* Full-bleed top-level section band: pull out by the panel padding on both
+         sides so the header runs edge-to-edge of the panel (width:auto lets the
+         negative margins stretch it to the padding box; the negative margin never
+         exceeds the padding box, so #rwth-content grows no horizontal scroll).
+         The horizontal padding stays at pad-panel, landing the label flush with
+         the inset body content below. Side border + rounded corners drop so it
+         reads as a clean full-width band rather than a floating card. */
+      .rwth-collapse-head--bleed {
+        width: auto; margin: 0 calc(-1 * var(--rwth-pad-panel));
+        border-left: 0; border-right: 0; border-radius: 0;
+      }
       .rwth-collapse-caret { font-size: 13px; color: var(--rwth-accent); line-height: 1; }
       .rwth-form-row { display: flex; gap: var(--rwth-gap-sm); }
       .rwth-field-grow { flex: 1; }
