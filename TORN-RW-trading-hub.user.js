@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.217
+// @version      0.3.218
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.217';
+  const SCRIPT_VERSION = '0.3.218';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -8363,11 +8363,17 @@
       .rwth-gear-label { text-transform: uppercase; letter-spacing: .3px; font-size: 10px; }
       .rwth-gear-btn {
         display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
-        background: transparent; color: var(--rwth-muted);
-        border: 1px solid var(--rwth-border-strong); border-radius: var(--rwth-radius-ctl);
+        background: transparent; color: var(--rwth-accent);
+        border: 1px solid var(--rwth-accent); border-radius: var(--rwth-radius-ctl);
         padding: 4px 9px; font: 12px var(--rwth-font-mono); line-height: 1;
       }
       .rwth-gear-btn:hover { color: var(--rwth-text); border-color: var(--rwth-secondary-strong); }
+      /* The resting gear now sits at accent (green) so every Advertise section
+         wheel reads the same pre-click — the Copy-to-Torn "Forum" gear no longer
+         looked gray next to the others just because no picture was set. The active
+         state is carried purely by the ● dot (.rwth-gear-dot) now; .has-img is kept
+         as a redundant no-op so the accent still holds if the resting colour ever
+         changes back. */
       .rwth-gear-btn.has-img { color: var(--rwth-accent); border-color: var(--rwth-accent); }
       .rwth-gear-dot { font-size: 8px; }
       /* Confident pressed/open state: filled chip + accent ring, held while open. */
