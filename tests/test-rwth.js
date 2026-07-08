@@ -1179,6 +1179,19 @@ test('toForumHtml gives transaction rows roomy padding by default, compact when 
   assert.match(compact, /padding: 3px 14px/);
 });
 
+// #337 — the transaction toggles moved behind a caret gear. Closed, the gear
+// button renders but the checkboxes stay hidden in the popover; open, both
+// checkboxes appear and reflect the resolved section flags.
+test('buildAdvTxGear hides the toggles until opened, then reflects the flags', () => {
+  const { buildAdvTxGear } = globalThis.__RwthPure;
+  const closed = buildAdvTxGear({ transactions: true, txCompact: false }, false);
+  assert.match(closed, /data-action="toggle-adv-tx-gear"/);
+  assert.doesNotMatch(closed, /data-adv-tx-compact/);
+  const open = buildAdvTxGear({ transactions: true, txCompact: true }, true);
+  assert.match(open, /data-adv-section="transactions"[^>]* checked/);
+  assert.match(open, /data-adv-tx-compact checked/);
+});
+
 test('toBazaarHtml uses the Verdana font scheme, not all-Courier', () => {
   const { AdvertiseGenerator } = globalThis.__RwthPure;
   const html = AdvertiseGenerator.toBazaarHtml(advItems, advSettings);

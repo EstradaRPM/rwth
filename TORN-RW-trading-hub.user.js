@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.213
+// @version      0.3.214
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.213';
+  const SCRIPT_VERSION = '0.3.214';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -564,6 +564,10 @@
       // boolean suffices; it re-adapts as advSurface changes. Click-toggled (never
       // :hover — that reintroduced the mobile tap-stick bug, v0.3.194).
       advSurfaceGearOpen: false,
+      // #337 — whether the Recent Transactions options gear popover is open. Same
+      // click-toggle caret pattern as advSurfaceGearOpen; holds the show/hide and
+      // compact-spacing toggles so they no longer sit at the bottom of the list.
+      advTxGearOpen: false,
     },
     ledger: {
       items: [],
@@ -4926,6 +4930,34 @@
       </div>`;
   }
 
+  // #337 — the Recent Transactions options gear. Same caret-popover pattern as
+  // buildAdvSurfaceGear, but carrying the two in-post toggles (show/hide and
+  // single-line compact spacing) so they live behind the wheel instead of
+  // trailing a long transaction list. The dot lights when compact is on. Pure;
+  // exposed via __RwthPure for the Node test seam.
+  function buildAdvTxGear(sections, open) {
+    const s = sections || {};
+    const pop = open
+      ? `<div class="rwth-adv-gear-pop">
+          <label class="rwth-intel-check">
+            <input type="checkbox" data-adv-section="transactions"${s.transactions ? ' checked' : ''}>
+            Show this section in the forum post
+          </label>
+          <label class="rwth-intel-check">
+            <input type="checkbox" data-adv-tx-compact${s.txCompact ? ' checked' : ''}>
+            Compact spacing (single-line) in the forum post
+          </label>
+        </div>`
+      : '';
+    return `<div class="rwth-adv-gear">
+        <button class="rwth-gear-btn${open ? ' is-open' : ''}${s.txCompact ? ' has-img' : ''}" type="button"
+                data-action="toggle-adv-tx-gear" aria-expanded="${open ? 'true' : 'false'}"
+                aria-label="Transaction options" title="Transaction options">⚙ <span class="rwth-gear-label">Options</span>${
+          s.txCompact ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
+        ${pop}
+      </div>`;
+  }
+
   function buildAdvertiseTab(mem) {
     const A = (mem && mem.advertise) || {};
     const L = (mem && mem.ledger) || {};
@@ -5128,20 +5160,17 @@
     // buildAdvSurfaceGear only for the forum surface). They stay shared stored
     // values consumed by toForumHtml; only the forum surface renders them.
 
-    // Recent transactions — optional social-proof block with its own in-post toggle.
+    // Recent transactions — optional social-proof block. Its in-post toggles
+    // (show/hide + compact spacing) now hang off a caret gear at the top of the
+    // section (#337), rather than trailing the (potentially long) tx list.
     const txBody = `
+        <div class="rwth-adv-tx-head">
+          ${buildAdvTxGear(sections, !!ui.advTxGearOpen)}
+        </div>
         ${txRows}
         <div class="rwth-form-actions">
           <button class="rwth-btn rwth-btn-add" type="button" data-action="add-tx">+ add transaction</button>
-        </div>
-        <label class="rwth-intel-check">
-          <input type="checkbox" data-adv-section="transactions"${sections.transactions ? ' checked' : ''}>
-          Show this section in the forum post
-        </label>
-        <label class="rwth-intel-check">
-          <input type="checkbox" data-adv-tx-compact${sections.txCompact ? ' checked' : ''}>
-          Compact spacing (single-line) in the forum post
-        </label>`;
+        </div>`;
 
     // The whole Copy-to-Torn body — text strip + surface switcher — is built
     // only while its section is unfolded, so a folded section costs zero
@@ -5341,6 +5370,7 @@
                                 advSurface: actionEl.dataset.surface, advSurfaceRaw: false } }); break;
         case 'toggle-adv-raw':  setState({ ui: { ...MEM.ui, advSurfaceRaw: !MEM.ui.advSurfaceRaw } }); break;
         case 'toggle-adv-gear': toggleAdvGear(); break;
+        case 'toggle-adv-tx-gear': setState({ ui: { ...MEM.ui, advTxGearOpen: !MEM.ui.advTxGearOpen } }); break;
         case 'toggle-img':    setState({ advertise: { ...MEM.advertise,
                                 imgEditId: MEM.advertise.imgEditId === id ? null : id } }); break;
         case 'close-img':     setState({ advertise: { ...MEM.advertise, imgEditId: null } }); break;
@@ -8250,6 +8280,9 @@
       /* #32 — the gear anchors its own caret popover; it now sits on the switcher's
          action row rather than hanging off the (previously wrapping) tab group. */
       .rwth-adv-gear { position: relative; display: inline-flex; }
+      /* #337 — Recent Transactions options gear sits top-right of the section so
+         its toggles no longer trail the list. */
+      .rwth-adv-tx-head { display: flex; justify-content: flex-end; margin-bottom: var(--rwth-gap-sm); }
       .rwth-gear-label { text-transform: uppercase; letter-spacing: .3px; font-size: 10px; }
       .rwth-gear-btn {
         display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
@@ -11899,6 +11932,7 @@
     advSurfaceImageField,
     buildAdvCopyFields,
     buildAdvSurfaceGear,
+    buildAdvTxGear,
     buildSettingsTab,
     buildScanChecklist,
     buildSellBox,
