@@ -427,6 +427,37 @@ test('buildScanPreview keeps a matched RW sale checked so tracked sales import h
   assert.strictEqual(preview.sales[0].checked, true);
 });
 
+test('buildScanPreview value guard protects a staged buy from a cheap uid-less same-name sale', () => {
+  // The reported batch-import bug: a 190k plain-Enfield sale (no uid in the log,
+  // so it falls through to name matching) must NOT close the multi-million RW
+  // Enfield bought in the same scan. The value guard only works if the staged
+  // buy carries its buyPrice into the match candidate.
+  const buy = P.classifyLogEvent({
+    id: 'buy-rw-enfield',
+    timestamp: 1779280000,
+    data: { item: { id: 614, uid: 444, name: 'Diamond Bladed Knife' }, final_price: 100_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-rw-enfield', {}, cats);
+  const cheapSale = P.classifyLogEvent({
+    id: 'sale-cheap-nonrw',
+    timestamp: 1779300000,
+    data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 190_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-cheap-nonrw', {}, cats);
+  const realSale = P.classifyLogEvent({
+    id: 'sale-real-rw',
+    timestamp: 1779372185,
+    data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 108_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-real-rw', {}, cats);
+
+  const preview = P.buildScanPreview([buy, cheapSale, realSale], { cats, items: [], transactions: [] });
+
+  // Exactly one sale imports — the real 108m one — and it closes the RW buy.
+  assert.strictEqual(preview.sales.length, 1);
+  assert.strictEqual(preview.sales[0].sell.saleNet, 108_000_000);
+  // The 190k sale is dropped to IGNORED, not staged against the RW buy.
+  const dropped = preview.ignored.find(r => r.reason === 'unmatched sale — no tracked RW buy');
+  assert.ok(dropped, 'the cheap non-RW sale is dropped to ignored');
+});
+
 test('buildScanPreview ignores an unrelated bazaar sale that is not an RW item', () => {
   // Selling something that isn't RW armor/weapon (drugs, plushies, junk) — its
   // name is absent from the cats index, so it resolves to no category. With no

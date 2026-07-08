@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.219
+// @version      0.3.220
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.219';
+  const SCRIPT_VERSION = '0.3.220';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1802,6 +1802,12 @@
               uid: stagedHit.uid != null ? stagedHit.uid : null,
               status: 'held',
               bonuses: stagedHit.bonuses || [],
+              // buyPrice MUST ride along: matchSell's value guard (net >= buyPrice *
+              // SALE_MATCH_MIN_RATIO) is the only thing that stops a tiny non-RW sale
+              // (a 190k plain Enfield) from closing a multi-million RW buy staged in
+              // the same batch import. Omit it and the guard reads "unknown cost" and
+              // waves the mis-match through.
+              buyPrice: stagedHit.buyPrice,
               buyTimestamp: stagedHit.buyTimestamp,
             });
           }
@@ -1859,7 +1865,10 @@
       if (trade.type === 'buy') preview.buys.push(trade.hit);
       else if (trade.type === 'sale') {
         const sell = trade.sell || {};
-        const matched = matchSell(sell, open);
+        // Match against the SAME pool the log-sales draw from (open rows + staged
+        // buys), so a buy scanned in this same pass can be closed by a trade sale —
+        // and the value guard sees the staged buy's cost either way.
+        const matched = matchSell(sell, saleMatchItems);
         enrichSellBonus(sell, matched);
         // Matched-only, same as the log-sale path above: a trade sale with no
         // tracked RW buy to close is dropped to IGNORED rather than imported.
