@@ -380,13 +380,15 @@ test('matchSell still closes legacy rows with no recorded uid by name', () => {
     P.matchSell({ itemName: 'Diamond Bladed Knife', uid: 999 }, held).id, 'legacy');
 });
 
-test('buildScanPreview stages a non-RW variant sale unchecked, not attached to the held RW row', () => {
+test('buildScanPreview drops a non-RW variant sale entirely — matched-only import', () => {
   const buy = P.classifyLogEvent({
     id: 'buy-rw',
     timestamp: 1779280000,
     data: { item: { id: 614, uid: 111, name: 'Diamond Bladed Knife' }, final_price: 75_000_000 },
   }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-rw', {}, cats);
-  // The user later sells a *standard* DBK (different uid) cheaply.
+  // The user later sells a *standard* DBK (different uid) cheaply. It shares the
+  // RW name but the value guard refuses to close the held RW row, so it is
+  // unmatched — and a sale log carries no rarity/bonus to prove it RW on its own.
   const sale = P.classifyLogEvent({
     id: 'sale-nonrw',
     timestamp: 1779372185,
@@ -396,12 +398,12 @@ test('buildScanPreview stages a non-RW variant sale unchecked, not attached to t
   const preview = P.buildScanPreview([buy, sale], { cats, items: [], transactions: [] });
 
   assert.strictEqual(preview.buys.length, 1);
-  assert.strictEqual(preview.sales.length, 1);
-  // Must NOT attach the cheap non-RW sale to the held RW buy…
-  assert.strictEqual(preview.sales[0].matchedId, null);
-  // …and, unmatched, it must default UNCHECKED so it never auto-imports as
-  // phantom income — the user commits without having to uncheck it by hand.
-  assert.strictEqual(preview.sales[0].checked, false);
+  // Unmatched → never staged. It is dropped to IGNORED so no non-RW variant can
+  // post phantom income (the user does not have to uncheck it by hand).
+  assert.strictEqual(preview.sales.length, 0);
+  const ignored = preview.ignored.find(r => r.itemName === 'Diamond Bladed Knife');
+  assert.ok(ignored, 'the unmatched sale is dropped to ignored');
+  assert.strictEqual(ignored.reason, 'unmatched sale — no tracked RW buy');
 });
 
 test('buildScanPreview keeps a matched RW sale checked so tracked sales import hands-free', () => {
@@ -444,7 +446,7 @@ test('buildScanPreview ignores an unrelated bazaar sale that is not an RW item',
 
   assert.strictEqual(preview.sales.length, 0);
   assert.strictEqual(preview.ignored.length, 1);
-  assert.strictEqual(preview.ignored[0].reason, 'non-RW sale');
+  assert.strictEqual(preview.ignored[0].reason, 'unmatched sale — no tracked RW buy');
   assert.strictEqual(preview.ignored[0].itemName, 'Xanax');
 });
 
@@ -619,13 +621,16 @@ test('buildScanPreviewUi renders review rows with a default-unchecked checkbox',
 });
 
 test('an unchecked sale is not imported and is snapshotted into the dismissal store', () => {
+  // Matched-only import: the sale must close a tracked RW buy to stage at all.
+  const held = { id: 'held-dbk', itemName: 'Diamond Bladed Knife', status: 'held',
+    bonuses: [], buyPrice: 75_000_000 };
   const preview = P.buildScanPreview([
     P.classifyLogEvent({
       id: 'sale-uncheck',
       timestamp: 1779372185,
       data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 90_000_000, buyer: 'BuyerName' },
     }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-uncheck', {}, cats),
-  ], { cats, items: [], transactions: [] });
+  ], { cats, items: [held], transactions: [] });
   assert.strictEqual(preview.sales.length, 1);
 
   // User unchecks the sale in the preview (syncScanPreviewEdit sets checked:false).
@@ -880,9 +885,12 @@ test('a scan sale whose txKey already exists in Recent Transactions is flagged d
     timestamp: 1779372185,
     data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], price: 100_000_000, net: 95_000_000, buyer: 'BuyerName' },
   }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-dupe', {}, cats);
+  // Matched-only import: a held RW row for the sale to close so it stages.
+  const held = () => [{ id: 'held-dbk', itemName: 'Diamond Bladed Knife', status: 'held',
+    bonuses: [], buyPrice: 75_000_000 }];
 
   // First scan: no prior transactions → not a duplicate.
-  const first = P.buildScanPreview([mkSale()], { cats, items: [], transactions: [] });
+  const first = P.buildScanPreview([mkSale()], { cats, items: held(), transactions: [] });
   assert.strictEqual(first.sales.length, 1);
   assert.strictEqual(first.sales[0].duplicate, false);
   const sell = first.sales[0].sell;
@@ -898,7 +906,7 @@ test('a scan sale whose txKey already exists in Recent Transactions is flagged d
 
   // Rescan the same log entry with that transaction already present → duplicate,
   // so the commit skips it and Recent Transactions is not written twice.
-  const second = P.buildScanPreview([mkSale()], { cats, items: [], transactions: [committedTx] });
+  const second = P.buildScanPreview([mkSale()], { cats, items: held(), transactions: [committedTx] });
   assert.strictEqual(second.sales.length, 1);
   assert.strictEqual(second.sales[0].duplicate, true);
 });
@@ -913,7 +921,10 @@ test('two identical sales in one scan dedupe: the second is flagged duplicate', 
   }, P.SCAN_LOG_TYPES.itemMarketSale, id, {}, cats);
 
   // Distinct entry ids (so both clear the seen gate) but identical sale content.
-  const preview = P.buildScanPreview([mk('sale-a'), mk('sale-b')], { cats, items: [], transactions: [] });
+  // Matched-only import: a held RW row lets both sales stage.
+  const held = [{ id: 'held-dbk', itemName: 'Diamond Bladed Knife', status: 'held',
+    bonuses: [], buyPrice: 75_000_000 }];
+  const preview = P.buildScanPreview([mk('sale-a'), mk('sale-b')], { cats, items: held, transactions: [] });
   assert.strictEqual(preview.sales.length, 2);
   assert.strictEqual(preview.sales[0].duplicate, false);
   assert.strictEqual(preview.sales[1].duplicate, true);

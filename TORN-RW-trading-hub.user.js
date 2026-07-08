@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.218
+// @version      0.3.219
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.218';
+  const SCRIPT_VERSION = '0.3.219';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1809,30 +1809,24 @@
         addEventKeys(eventKeys);
       } else if (row.type === 'sale') {
         const sell = row.sell || {};
-        const cat = scanCategory(sell.itemName, cats);
         const matched = matchSell(sell, saleMatchItems);
         enrichSellBonus(sell, matched);
-        // Two levels of RW proof for a scanned sale — a sale log carries no
-        // bonus, so this is its only guard (unlike buys, it never runs
-        // itemdetails):
-        //   • MATCHED — it closes an open/staged RW ledger row. Unequivocal RW.
-        //   • RW-by-category only — its item resolves to a weapon/armor name.
-        //     But a weapon that exists as BOTH an RW and a plain market variant
-        //     (same name, same category: DBK, Enfield, …) resolves to that RW
-        //     category for the plain variant too. The value guard in matchSell
-        //     already refuses to close the pricey RW row with a cheap variant
-        //     sale, so the variant lands here as matched=null and would import
-        //     as phantom income.
-        // So: not-RW AND unmatched → ignore (drugs/plushies/junk dumps); RW-by-
-        // category BUT unmatched → still stage (visible + recoverable) but
-        // default UNCHECKED, so an ambiguous plain-variant sale never
-        // auto-imports while a proven (matched) RW sale stays hands-free.
-        if (!isRwCategory(cat) && !matched) {
-          preview.ignored.push({ type: 'ignored', reason: 'non-RW sale', eventKeys, itemName: sell.itemName });
+        // MATCHED-ONLY IMPORT. A scanned sale log carries no rarity and no bonus
+        // (only the buy / armoury instance does), and once the item leaves the
+        // inventory itemdetails can't resolve it either — so a sale has NO
+        // per-instance RW signal of its own. The only proof it is the RW variant
+        // (not the identical-named plain-market variant: DBK, Enfield, …) is that
+        // it CLOSES an open/staged RW ledger row via matchSell (uid, else name +
+        // value guard). So import matched sales only. An unmatched sale — a non-RW
+        // dump OR a real RW sale whose buy was never tracked — is dropped to
+        // IGNORED, never staged, so no non-RW variant can slip in and post
+        // phantom income. (Untracked-buy RW sales must be added by hand.)
+        if (!matched) {
+          preview.ignored.push({ type: 'ignored', reason: 'unmatched sale — no tracked RW buy', eventKeys, itemName: sell.itemName });
         } else {
           const duplicate = txSeen.has(txKey(sell));
           if (!duplicate) txSeen.add(txKey(sell));
-          preview.sales.push({ sell, matchedId: matched ? matched.id : null, duplicate, checked: !!matched, eventKeys });
+          preview.sales.push({ sell, matchedId: matched.id, duplicate, checked: true, eventKeys });
         }
         addEventKeys(eventKeys);
       } else if (row.type === 'mug') {
@@ -1867,9 +1861,15 @@
         const sell = trade.sell || {};
         const matched = matchSell(sell, open);
         enrichSellBonus(sell, matched);
-        const duplicate = txSeen.has(txKey(sell));
-        if (!duplicate) txSeen.add(txKey(sell));
-        preview.sales.push({ sell, matchedId: matched ? matched.id : null, duplicate, eventKeys });
+        // Matched-only, same as the log-sale path above: a trade sale with no
+        // tracked RW buy to close is dropped to IGNORED rather than imported.
+        if (!matched) {
+          preview.ignored.push({ type: 'ignored', reason: 'unmatched trade sale — no tracked RW buy', eventKeys, itemName: sell.itemName });
+        } else {
+          const duplicate = txSeen.has(txKey(sell));
+          if (!duplicate) txSeen.add(txKey(sell));
+          preview.sales.push({ sell, matchedId: matched.id, duplicate, checked: true, eventKeys });
+        }
       } else if (trade.type === 'ignored') preview.ignored.push(trade);
       else preview.review.push(trade);
       addEventKeys(eventKeys);
