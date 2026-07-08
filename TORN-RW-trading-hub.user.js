@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.216
+// @version      0.3.217
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.216';
+  const SCRIPT_VERSION = '0.3.217';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -568,6 +568,10 @@
       // click-toggle caret pattern as advSurfaceGearOpen; holds the show/hide and
       // compact-spacing toggles so they no longer sit at the bottom of the list.
       advTxGearOpen: false,
+      // Whether the "Items to advertise" pricing gear popover is open. Same
+      // click-toggle caret pattern as the other Advertise gears; holds the two
+      // item-market markup toggles so they no longer sit above the item list.
+      advItemsGearOpen: false,
     },
     ledger: {
       items: [],
@@ -4701,7 +4705,7 @@
           <button class="rwth-btn-sm" type="button" data-action="close-img">Done</button>
         </div>`
       : '';
-    return `<div class="rwth-adv-item" data-adv-item="${escapeAttr(item.id)}">
+    return `<div class="rwth-adv-item${checked ? ' is-included' : ' is-excluded'}" data-adv-item="${escapeAttr(item.id)}">
       <label class="rwth-adv-check">
         <input type="checkbox" data-adv-check${checked ? ' checked' : ''}>
         <span class="rwth-row-name">${escapeAttr(item.itemName)}${
@@ -4961,6 +4965,37 @@
       </div>`;
   }
 
+  // The "Items to advertise" pricing gear button + its caret popover. Same
+  // click-toggle caret pattern as buildAdvTxGear/buildAdvSurfaceGear, carrying the
+  // two item-market markup toggles (the only controls on the tab that change
+  // prices) so they live behind the wheel instead of stacking above the list — the
+  // mug sub-toggle shows only while markup is on. The dot lights when markup is on.
+  // Pure — exposed via __RwthPure for the Node test seam.
+  function buildAdvItemsGear(markup, mugMarkup, mugPct, open) {
+    const mugField = markup ? `
+          <label class="rwth-intel-check">
+            <input type="checkbox" data-adv-mug${mugMarkup ? ' checked' : ''}>
+            Also cover a mug on the sale (lists higher so the price after fees and a possible mug still nets your ask, using your ${Number(mugPct) || 0}% mug cushion)
+          </label>` : '';
+    const pop = open
+      ? `<div class="rwth-adv-gear-pop">
+          <label class="rwth-intel-check">
+            <input type="checkbox" data-adv-markup${markup ? ' checked' : ''}>
+            Mark prices up for the item market (lists 5% over your ask so the price after fees still nets your ask)
+          </label>
+          <span class="rwth-field-help">The only control that changes your prices. When on, each row below shows the item-market list price &mdash; grossed up so the price after fees still nets your ask.</span>
+          ${mugField}
+        </div>`
+      : '';
+    return `<div class="rwth-adv-gear">
+        <button class="rwth-gear-btn${open ? ' is-open' : ''}${markup ? ' has-img' : ''}" type="button"
+                data-action="toggle-adv-items-gear" aria-expanded="${open ? 'true' : 'false'}"
+                aria-label="Pricing options" title="Pricing options">⚙ <span class="rwth-gear-label">Pricing</span>${
+          markup ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
+        ${pop}
+      </div>`;
+  }
+
   function buildAdvertiseTab(mem) {
     const A = (mem && mem.advertise) || {};
     const L = (mem && mem.ledger) || {};
@@ -5050,26 +5085,26 @@
     // the quick-copy text strip and the surface preview/copy switcher) — and the
     // set-once branding/copy/transactions fold away beneath them.
 
-    // #331 — the "include mug buffer" toggle surfaces only when markup is on.
-    // It grosses each item-market list price up further (using the mug cushion
-    // from Settings) so the price still nets the ask after both the fee and a mug.
-    const mugMarkupField = markup ? `
-        <label class="rwth-intel-check">
-          <input type="checkbox" data-adv-mug${mugMarkup ? ' checked' : ''}>
-          Also cover a mug on the sale (lists higher so the price after fees and a possible mug still nets your ask, using your ${Number(intel.mugBuffer) || 0}% mug cushion)
-        </label>` : '';
-    // The item-market markup controls live with the items they reprice: the
-    // toggle (and its mug sub-toggle) sit directly above the rows, and each row
-    // surfaces its per-item item-market reference price when markup is on. This
-    // is the only control on the tab that changes prices.
-    const itemsBody = `
-        <label class="rwth-intel-check">
-          <input type="checkbox" data-adv-markup${markup ? ' checked' : ''}>
-          Mark prices up for the item market (lists 5% over your ask so the price after fees still nets your ask)
-        </label>
-        <span class="rwth-field-help">The only control that changes your prices. When on, each row below shows the item-market list price &mdash; grossed up so the price after fees still nets your ask.</span>
-        ${mugMarkupField}
-        ${itemRows}`;
+    // The section leads with one compact action row (same rwth-output-head shape
+    // as Recent Transactions / Copy-to-Torn, so all four Advertise sections read
+    // as one system): the pricing gear on the left holds the two item-market
+    // markup toggles — the only controls on the tab that change prices — so they
+    // no longer stack above the list, and the selection controls on the right show
+    // "N of M" plus All/None so a long list is easy to include/exclude in bulk.
+    // Each row still surfaces its per-item item-market reference price when markup
+    // is on. The head is dropped when there are no listed items (itemRows is then
+    // the placeholder).
+    const includedCount = selectedItems.length;
+    const itemsHead = `
+        <div class="rwth-output-head rwth-adv-items-head">
+          ${buildAdvItemsGear(markup, mugMarkup, Number(intel.mugBuffer) || 0, !!ui.advItemsGearOpen)}
+          <div class="rwth-adv-items-sel">
+            <span class="rwth-adv-sel-count">${includedCount} of ${listed.length}</span>
+            <button class="rwth-btn-sm" type="button" data-action="adv-select-all"${includedCount >= listed.length ? ' disabled' : ''}>All</button>
+            <button class="rwth-btn-sm" type="button" data-action="adv-select-none"${includedCount === 0 ? ' disabled' : ''}>None</button>
+          </div>
+        </div>`;
+    const itemsBody = listed.length ? `${itemsHead}${itemRows}` : itemRows;
 
     // Store & brand — the universal edit-once layer (#31/S1). Consolidates the
     // fields shared across every surface: identity, links, theme/colours, the
@@ -5377,6 +5412,9 @@
         case 'toggle-adv-raw':  setState({ ui: { ...MEM.ui, advSurfaceRaw: !MEM.ui.advSurfaceRaw } }); break;
         case 'toggle-adv-gear': toggleAdvGear(); break;
         case 'toggle-adv-tx-gear': setState({ ui: { ...MEM.ui, advTxGearOpen: !MEM.ui.advTxGearOpen } }); break;
+        case 'toggle-adv-items-gear': setState({ ui: { ...MEM.ui, advItemsGearOpen: !MEM.ui.advItemsGearOpen } }); break;
+        case 'adv-select-all':  setState({ advertise: { ...MEM.advertise, selectedIds: null } }); break;
+        case 'adv-select-none': setState({ advertise: { ...MEM.advertise, selectedIds: [] } }); break;
         case 'toggle-img':    setState({ advertise: { ...MEM.advertise,
                                 imgEditId: MEM.advertise.imgEditId === id ? null : id } }); break;
         case 'close-img':     setState({ advertise: { ...MEM.advertise, imgEditId: null } }); break;
@@ -8219,8 +8257,22 @@
       .rwth-adv-section { display: flex; flex-direction: column; gap: var(--rwth-gap-sm); }
       .rwth-adv-item {
         display: flex; flex-direction: column; gap: var(--rwth-gap-sm);
-        border: 1px solid var(--rwth-border-soft); border-radius: var(--rwth-radius-ctl); padding: var(--rwth-gap-sm);
+        border: 1px solid var(--rwth-border-soft); border-left: 2px solid var(--rwth-border-soft);
+        border-radius: var(--rwth-radius-ctl); padding: var(--rwth-gap-sm);
       }
+      /* Included/excluded is scannable at a glance across a long list: an included
+         card gets an accent left-rail and a faint tint; an excluded one keeps the
+         same 2px rail (so nothing shifts) but neutral + dimmed, so the eye lands
+         only on what is actually going into the advert. */
+      .rwth-adv-item.is-included { border-left-color: var(--rwth-accent); background: var(--rwth-fill-faint); }
+      .rwth-adv-item.is-excluded { opacity: .5; }
+      /* The pricing gear + selection controls share the Recent-Transactions head
+         shape (rwth-output-head: left group / right group). */
+      .rwth-adv-items-head { margin-bottom: var(--rwth-gap-sm); }
+      .rwth-adv-items-sel { display: flex; align-items: center; gap: 6px; }
+      .rwth-adv-sel-count { font: 11px var(--rwth-font-mono); color: var(--rwth-muted); }
+      .rwth-adv-items-sel .rwth-btn-sm[disabled] { opacity: .4; cursor: default; }
+      .rwth-adv-items-sel .rwth-btn-sm[disabled]:hover { color: var(--rwth-secondary); border-color: var(--rwth-border-strong); }
       .rwth-adv-overrides { display: flex; flex-direction: column; gap: var(--rwth-gap-sm); margin-top: 2px; }
       .rwth-adv-override-grid {
         display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--rwth-gap-sm);
@@ -8255,7 +8307,7 @@
       .rwth-swatch.is-sel { outline: 2px solid var(--rwth-accent); outline-offset: 1px; }
       .rwth-swatch-hexrow { display: flex; flex-direction: column; gap: 4px; }
       .rwth-swatch-hex { font-family: var(--rwth-font-mono); }
-      .rwth-adv-market { margin-top: 6px; font: 11px var(--rwth-font-mono); color: #e0a85a; }
+      .rwth-adv-market { margin-top: 6px; font: 11px var(--rwth-font-mono); color: var(--rwth-warn); }
       .rwth-adv-market-net { color: var(--rwth-muted); }
       .rwth-adv-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
       .rwth-adv-check input { accent-color: var(--rwth-accent); }
@@ -11958,6 +12010,7 @@
     buildAdvCopyFields,
     buildAdvSurfaceGear,
     buildAdvTxGear,
+    buildAdvItemsGear,
     buildSettingsTab,
     buildScanChecklist,
     buildSellBox,
