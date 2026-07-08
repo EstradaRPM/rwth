@@ -1168,6 +1168,17 @@ test('toForumHtml omits the Recent Transactions section when there are none', ()
   assert.doesNotMatch(html, /Recent Transactions/);
 });
 
+// #337 — the txCompact flag tightens each transaction row's vertical padding;
+// default off keeps the roomier 9px padding, on switches it to 3px.
+test('toForumHtml gives transaction rows roomy padding by default, compact when opted in', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const roomy = AdvertiseGenerator.toForumHtml(advItems, advTxs, advSettings);
+  assert.match(roomy, /padding: 9px 14px/);
+  assert.doesNotMatch(roomy, /padding: 3px 14px/);
+  const compact = AdvertiseGenerator.toForumHtml(advItems, advTxs, { ...advSettings, txCompact: true });
+  assert.match(compact, /padding: 3px 14px/);
+});
+
 test('toBazaarHtml uses the Verdana font scheme, not all-Courier', () => {
   const { AdvertiseGenerator } = globalThis.__RwthPure;
   const html = AdvertiseGenerator.toBazaarHtml(advItems, advSettings);

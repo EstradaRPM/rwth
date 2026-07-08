@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.212
+// @version      0.3.213
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.212';
+  const SCRIPT_VERSION = '0.3.213';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -362,7 +362,7 @@
     // (settings) -> { identity: { shopName, tagline },
     //                 theme:    { themeKey, <every ADV_THEME_TOKENS colour> },
     //                 copy:     { subBanner, intro, alsoRotating, footerTagline },
-    //                 sections: { transactions },
+    //                 sections: { transactions, txCompact },
     //                 locations: { bazaar, itemMarket, displayCase },
     //                 availability: <composed sentence | ''>,
     //                 images:   { forum, bazaar, signature },
@@ -377,8 +377,9 @@
     // an explicit blank ('') yields '' so the builder hides that block. The
     // builder renders a block only when its copy string is non-empty.
     // sections.transactions is a plain show/hide flag (default show) for the
-    // non-copy Recent Transactions block. Pure; exposed via __RwthPure for the
-    // Node test seam.
+    // non-copy Recent Transactions block; sections.txCompact (#337) is its
+    // single-line-spacing flag (default off). Pure; exposed via __RwthPure for
+    // the Node test seam.
     resolve(settings) {
       const s = settings && typeof settings === 'object' ? settings : {};
       const identity = {};
@@ -400,7 +401,9 @@
       copy.footerTagline = s.footerTagline === undefined
         ? identity.tagline
         : String(s.footerTagline).trim();
-      const sections = { transactions: s.showTransactions !== false };
+      // #337 — txCompact is an opt-in single-line-spacing flag for the Recent
+      // Transactions block. Default off so existing posts keep the roomier look.
+      const sections = { transactions: s.showTransactions !== false, txCompact: s.txCompact === true };
       // #320 — selected sell locations (pure copy, no pricing effect). Normalize
       // the persisted booleans, then compose the availability sentence (a manual
       // override wins). `locations` feeds the tab checkboxes; `availability` is
@@ -616,6 +619,9 @@
       // absent key resolves to its neutral default, while an explicit blank ''
       // written by the user hides that block (see AdvConfig.resolve / #319).
       showTransactions: true,
+      // #337 — single-line spacing for the Recent Transactions block. Default
+      // off (roomier double spacing); on tightens each sold-line's padding.
+      txCompact: false,
       // #320 — where the shop sells, as { bazaar, itemMarket, displayCase }
       // booleans. Default none-selected so a fresh install shows no availability
       // line until the user declares a location. availabilityOverride replaces
@@ -4302,11 +4308,14 @@
 
   // One Recent Transactions line. The tx record carries no buyer XID, so the
   // buyer renders as plain text rather than the template's profile link.
-  function forumTxRow(tx, t) {
+  // `compact` (#337) tightens the vertical padding so a long list of sales
+  // stacks single-spaced instead of the roomier default.
+  function forumTxRow(tx, t, compact) {
     const bonus = tx.bonusName ? ` (${escapeAttr(tx.bonusName)})` : '';
     const buyer = tx.buyer ? ` to&nbsp;${escapeAttr(tx.buyer)}` : '';
     const price = tx.price != null ? ` at ${escapeAttr(fmtMoney(tx.price))}` : '';
-    return `<tr><td style="background: ${t.bgCard}; padding: 9px 14px; border: 0;">`
+    const pad = compact ? '3px 14px' : '9px 14px';
+    return `<tr><td style="background: ${t.bgCard}; padding: ${pad}; border: 0;">`
       + `<span style="color: ${t.textMuted}; font-size: 11px; font-style: italic; `
       + `font-family: Consolas, 'Courier New', monospace;">`
       + `You sold a&nbsp;${escapeAttr(tx.itemName)}${bonus}${buyer}${price}</span></td></tr>`;
@@ -4448,7 +4457,7 @@
         rows.push(forumSectionHeader('Recent Transactions', t));
         rows.push(`<tr><td style="background: ${t.bg}; padding: 6px 22px 16px; border: 0;">`
           + `<table ${TBL} width="100%" style="background: ${t.bgCard}; border: 0; border-collapse: collapse;">`
-          + `<tbody>${txs.map(tx => forumTxRow(tx, t)).join('')}</tbody></table></td></tr>`);
+          + `<tbody>${txs.map(tx => forumTxRow(tx, t, sections.txCompact)).join('')}</tbody></table></td></tr>`);
       }
       rows.push(forumRule(t));
       // Footer — tagline left, bazaar link right. A blank footer tagline (#319)
@@ -5128,6 +5137,10 @@
         <label class="rwth-intel-check">
           <input type="checkbox" data-adv-section="transactions"${sections.transactions ? ' checked' : ''}>
           Show this section in the forum post
+        </label>
+        <label class="rwth-intel-check">
+          <input type="checkbox" data-adv-tx-compact${sections.txCompact ? ' checked' : ''}>
+          Compact spacing (single-line) in the forum post
         </label>`;
 
     // The whole Copy-to-Torn body — text strip + surface switcher — is built
@@ -5462,6 +5475,14 @@
     // checkbox commits on `change` and re-renders so the forum output updates.
     if (e.target.matches && e.target.matches('[data-adv-section="transactions"]')) {
       MEM.settings = { ...MEM.settings, showTransactions: e.target.checked };
+      Store.set('rwth_settings', MEM.settings);
+      render();
+      return;
+    }
+    // #337 — Recent Transactions single-line spacing. Stored as txCompact; the
+    // checkbox commits on `change` and re-renders so the forum output updates.
+    if (e.target.matches && e.target.matches('[data-adv-tx-compact]')) {
+      MEM.settings = { ...MEM.settings, txCompact: e.target.checked };
       Store.set('rwth_settings', MEM.settings);
       render();
       return;
