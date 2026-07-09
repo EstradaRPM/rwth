@@ -840,6 +840,32 @@ test('resolveScanCutoffUnix yields null when neither lastScan nor scanBackTo is 
   assert.strictEqual(P.resolveScanCutoffUnix(0, 'not-a-date'), null);
 });
 
+// S? — Refresh rate-limit cooldown (shared Torn 100/60s budget)
+
+test('scanCooldownRemainingMs is 0 before any scan has ever run', () => {
+  // No lastScan → first Refresh is never throttled.
+  assert.strictEqual(P.scanCooldownRemainingMs(0, Date.now(), P.SCAN_COOLDOWN_MS), 0);
+  assert.strictEqual(P.scanCooldownRemainingMs(null, Date.now(), P.SCAN_COOLDOWN_MS), 0);
+  assert.strictEqual(P.scanCooldownRemainingMs(undefined, Date.now(), P.SCAN_COOLDOWN_MS), 0);
+});
+
+test('scanCooldownRemainingMs blocks a Refresh fired inside the cooldown window', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  const lastScan = now - 3000;   // scanned 3s ago, cooldown is 8s
+  assert.strictEqual(P.scanCooldownRemainingMs(lastScan, now, 8000), 5000);
+});
+
+test('scanCooldownRemainingMs clears once the cooldown has fully elapsed', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  assert.strictEqual(P.scanCooldownRemainingMs(now - 8000, now, 8000), 0);   // exactly at
+  assert.strictEqual(P.scanCooldownRemainingMs(now - 9000, now, 8000), 0);   // past
+});
+
+test('scanCooldownRemainingMs never traps on a clock skew (lastScan in the future)', () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  assert.strictEqual(P.scanCooldownRemainingMs(now + 5000, now, 8000), 0);
+});
+
 test('formatLastScanned reports "Never scanned" before the first scan', () => {
   assert.strictEqual(P.formatLastScanned(0, Date.now()), 'Never scanned');
   assert.strictEqual(P.formatLastScanned(null, Date.now()), 'Never scanned');

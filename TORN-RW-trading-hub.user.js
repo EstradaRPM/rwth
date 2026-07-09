@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.222
+// @version      0.3.223
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.222';
+  const SCRIPT_VERSION = '0.3.223';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -481,6 +481,12 @@
   // categories its scan setup needs.
   const API_BASE = 'https://api.torn.com';
   const SCAN_LOG_LIMIT = 100;
+  // Refresh rate-limit guard: Torn's 100-req/60s cap is shared across ALL of a
+  // user's scripts, so we can't assume a full budget is ours. Each completed scan
+  // fires a small burst of calls, so a poweruser mashing Refresh could stack bursts
+  // and starve their other scripts. A short post-scan cooldown throttles that
+  // without slowing any single legitimate scan. 8s → at most ~7 scans/min.
+  const SCAN_COOLDOWN_MS = 8000;
   const SCAN_LOG_TYPES = {
     auctionBuy: 4320,
     itemMarketBuy: 1112,
@@ -6727,6 +6733,20 @@
     return backTo;
   }
 
+  // Pure rate-limit guard (ADR-0002): ms still to wait before Refresh may fire
+  // again, measured from the last COMPLETED scan (`lastScan`, epoch ms). 0 means
+  // clear to scan. Anchoring on lastScan means a failed scan (which never sets it)
+  // never traps the user in a cooldown, and the throttle survives a page reload
+  // (lastScan is persisted) — the conservative choice for the shared API budget.
+  function scanCooldownRemainingMs(lastScan, now, cooldownMs) {
+    const last = Number(lastScan);
+    if (!Number.isFinite(last) || last <= 0) return 0;
+    const elapsed = Number(now) - last;
+    if (!Number.isFinite(elapsed) || elapsed < 0) return 0;
+    const remaining = Number(cooldownMs) - elapsed;
+    return remaining > 0 ? remaining : 0;
+  }
+
   async function fetchLogType(logType, key, cutoffUnix) {
     // Transport + envelope unwrap live in the client now (#6); the `_`
     // cache-buster and the `from` cutoff are preserved by Torn.userLog.
@@ -6782,6 +6802,15 @@
   const LogScanner = {
     async scan() {
       if (MEM.ledger.scanning) return;
+      // Rate-limit guard: ignore a Refresh fired inside the post-scan cooldown so
+      // rapid clicks can't stack API bursts against Torn's shared 100/60s cap.
+      const cooldownLeft = scanCooldownRemainingMs(MEM.ledger.lastScan, Date.now(), SCAN_COOLDOWN_MS);
+      if (cooldownLeft > 0) {
+        const wait = Math.ceil(cooldownLeft / 1000);
+        setState({ fetchError: null, ledger: { ...MEM.ledger,
+          scanMessage: `Just scanned — wait ${wait}s before refreshing again (Torn's 100-call/min API limit is shared across all your scripts).` } });
+        return;
+      }
       scanDebugReset();
       const key = (MEM.settings.apiKey || '').trim();
       if (!key) {
@@ -12149,6 +12178,8 @@
     selectedScanLogTypes,
     scanCutoffUnix,
     resolveScanCutoffUnix,
+    scanCooldownRemainingMs,
+    SCAN_COOLDOWN_MS,
     formatLastScanned,
     mergeLadder,
     hasRealApiKey,
