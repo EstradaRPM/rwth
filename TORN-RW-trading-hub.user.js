@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.223
+// @version      0.3.224
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.223';
+  const SCRIPT_VERSION = '0.3.224';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -6815,6 +6815,19 @@
       const key = (MEM.settings.apiKey || '').trim();
       if (!key) {
         setState({ fetchError: 'Set your Torn API key in Settings before scanning.' });
+        return;
+      }
+      // First scan needs an explicit window. With no prior scan AND no "scan back
+      // to" date the cutoff resolves to null — an unbounded default pull (up to
+      // SCAN_LOG_LIMIT per type) against the shared API budget. Reject it and open
+      // the ⚙ Scan-settings panel so the user picks a start date deliberately. Once
+      // a scan has run, lastScan supplies the floor, so this never blocks the fast
+      // since-last-scan path even if the date field is left blank.
+      if (resolveScanCutoffUnix(MEM.ledger.lastScan, MEM.settings.scanBackTo) == null) {
+        setState({
+          fetchError: 'Pick a “Scan back to” date first — opening ⚙ Scan settings (next to Refresh) so you can set how far back to scan.',
+          ui: { ...MEM.ui, scanSettingsOpen: true },
+        });
         return;
       }
       setState({ fetchError: null, ledger: { ...MEM.ledger, scanning: true, scanMessage: '', scanDebugSummary: [] } });
