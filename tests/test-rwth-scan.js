@@ -175,11 +175,13 @@ test('buildScanPreview reconciles same-scan backloaded buy, sale, and mug', () =
       final_price: 75_000_000,
     },
   }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-1', {}, {});
+  // The RW instance's own sale names its uid (verified: RW sales carry the uid on
+  // every channel), so it uid-exact matches the same-scan staged buy.
   const sale = P.classifyLogEvent({
     id: 'sale-1',
     timestamp: soldAt,
     data: {
-      item: { id: 614, name: 'Diamond Bladed Knife' },
+      item: { id: 614, uid: 19121539308, name: 'Diamond Bladed Knife' },
       net: 120_000_000,
       buyer: 'BuyerName',
     },
@@ -427,35 +429,52 @@ test('buildScanPreview keeps a matched RW sale checked so tracked sales import h
   assert.strictEqual(preview.sales[0].checked, true);
 });
 
-test('buildScanPreview value guard protects a staged buy from a cheap uid-less same-name sale', () => {
-  // The reported batch-import bug: a 190k plain-Enfield sale (no uid in the log,
-  // so it falls through to name matching) must NOT close the multi-million RW
-  // Enfield bought in the same scan. The value guard only works if the staged
-  // buy carries its buyPrice into the match candidate.
+test('a uid-less non-RW variant sale cannot close a held uid-bearing RW row (real log shapes)', () => {
+  // Verified against live Torn logs: a RW instance carries a real uid on every
+  // sale channel; a standard/non-RW variant is stackable and sells with NO uid
+  // (bazaar reports uid 0, read as null). So the RW Enfield's own sale names its
+  // uid, and the non-RW variant dump is uid-less. The uid-less dump must NOT
+  // close the multi-million RW row — the uid rule blocks it before the value
+  // guard is even reached; the real uid-bearing sale closes the row.
   const buy = P.classifyLogEvent({
     id: 'buy-rw-enfield',
     timestamp: 1779280000,
     data: { item: { id: 614, uid: 444, name: 'Diamond Bladed Knife' }, final_price: 100_000_000 },
   }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-rw-enfield', {}, cats);
-  const cheapSale = P.classifyLogEvent({
-    id: 'sale-cheap-nonrw',
+  // Non-RW variant dumped on the bazaar: uid 0 -> null. Priced high (30m) so ONLY
+  // the uid rule (not the value guard) can stop it.
+  const nonRwSale = P.classifyLogEvent({
+    id: 'sale-nonrw',
     timestamp: 1779300000,
-    data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 190_000, buyer: 'Buyer' },
-  }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-cheap-nonrw', {}, cats);
+    data: { item: [{ id: 614, uid: 0, name: 'Diamond Bladed Knife' }], cost_total: 30_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.bazaarSale, 'sale-nonrw', {}, cats);
+  // The genuine RW sale carries the instance uid (item market).
   const realSale = P.classifyLogEvent({
     id: 'sale-real-rw',
     timestamp: 1779372185,
-    data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 108_000_000, buyer: 'Buyer' },
+    data: { items: [{ id: 614, uid: 444, name: 'Diamond Bladed Knife' }], cost_total: 108_000_000, buyer: 'Buyer' },
   }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-real-rw', {}, cats);
 
-  const preview = P.buildScanPreview([buy, cheapSale, realSale], { cats, items: [], transactions: [] });
+  const preview = P.buildScanPreview([buy, nonRwSale, realSale], { cats, items: [], transactions: [] });
 
   // Exactly one sale imports — the real 108m one — and it closes the RW buy.
   assert.strictEqual(preview.sales.length, 1);
   assert.strictEqual(preview.sales[0].sell.saleNet, 108_000_000);
-  // The 190k sale is dropped to IGNORED, not staged against the RW buy.
+  // The uid-less non-RW sale is dropped to IGNORED, not staged against the RW buy.
   const dropped = preview.ignored.find(r => r.reason === 'unmatched sale — no tracked RW buy');
-  assert.ok(dropped, 'the cheap non-RW sale is dropped to ignored');
+  assert.ok(dropped, 'the uid-less non-RW variant sale is dropped to ignored');
+});
+
+test('matchSell value guard still backstops the pure uid-less legacy case', () => {
+  // Two uid-less rows (legacy / hand-entered) share a name; a near-zero sale must
+  // not close the expensive one — the value guard is the only signal left here.
+  const held = [
+    { id: 'cheap', itemName: 'Diamond Bladed Knife', status: 'held', bonuses: [], buyPrice: 500_000 },
+    { id: 'dear', itemName: 'Diamond Bladed Knife', status: 'held', bonuses: [], buyPrice: 100_000_000 },
+  ];
+  // 190k proceeds: >= 20% of the 500k row, but a sliver of the 100m row.
+  const m = P.matchSell({ itemName: 'Diamond Bladed Knife', saleNet: 190_000 }, held);
+  assert.strictEqual(m.id, 'cheap');
 });
 
 test('the RW trade sale wins its instance; a uid-less non-RW variant sale cannot steal it', () => {

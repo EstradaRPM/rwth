@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.221
+// @version      0.3.222
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.221';
+  const SCRIPT_VERSION = '0.3.222';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -998,21 +998,31 @@
   // venues (auction / item market / bazaar / trade).
   //
   // RW weapons (DBK, Enfield, …) and their plain standard variants share a name
-  // + itemid but never an armoury uid, and the sale log alone carries no
-  // rarity/bonus to separate them. So matching has two lines of defence:
+  // + itemid. The KEY asymmetry — verified against live Torn sale logs — is the
+  // armoury uid: a ranked-war instance is unique and carries a real uid on EVERY
+  // sale channel (auction, item market, bazaar, trade); the standard variant is
+  // stackable and sells with NO uid (bazaar reports uid 0, which we read as null).
+  // So the uid is the whole test, in two lines of defence:
   //
-  //   1. uid — the unequivocal key. If the sale names an armoury instance we
-  //      hold, that row wins outright. If it names one we DON'T hold, any
-  //      same-name row with a known *different* uid is provably a separate item
-  //      and is dropped; only rows we can't identify (uid-less legacy / hand-
-  //      entered) stay eligible. Auction wins always carry the uid; trades now
-  //      do too; item-market/bazaar carry it when the log provides it.
+  //   1. uid — the unequivocal key.
+  //      1a. Exact instance: a sale naming a uid we hold closes that row outright,
+  //          even at a steep real loss.
+  //      1b. A row with a known uid can ONLY be closed by that exact-uid sale.
+  //          Name matching is therefore confined to the uid-less⇄uid-less world:
+  //          a sale that reaches the name path (no exact match) drops EVERY
+  //          candidate that carries a uid. This is what stops a uid-less non-RW
+  //          variant sale from closing a held RW (uid-bearing) row — the phantom
+  //          this whole module fights. Only genuinely uid-less rows (legacy /
+  //          hand-entered) remain eligible for a name match.
   //
-  //   2. value guard — for any match that falls through to name (a uid-less sale
-  //      or a uid-less candidate), refuse to close a row when the proceeds are a
-  //      tiny fraction of its cost. That is the −100% phantom, never a real sale
-  //      of a multi-million RW item. A refused row simply stays open for manual
-  //      close (Edit-item status); the sale still posts to Recent Transactions.
+  //   2. value guard — a backstop for that remaining uid-less⇄uid-less case:
+  //      refuse to close a row when the proceeds are a tiny fraction of its cost
+  //      (the −100% phantom). A refused row stays open for manual close.
+  //
+  // A uid-less sale of a genuine RW item (rare — a channel that dropped the uid)
+  // will not auto-close its uid-bearing row; the row stays open (safe, visible)
+  // and the user closes it by hand. That is the deliberate trade: never post a
+  // phantom, even at the cost of an occasional missed auto-close.
   //
   // Returns null when nothing matches — caller treats that as a historical sale
   // destined for Recent Transactions.
@@ -1030,11 +1040,11 @@
     if (!want) return null;
     let candidates = openPositions.filter(p => isOpen(p) && norm(p.itemName) === want);
     if (!candidates.length) return null;
-    // 1b. Sale named an instance we don't hold → drop provably-different uids.
-    if (sellUid) {
-      candidates = candidates.filter(p => p.uid == null);
-      if (!candidates.length) return null;
-    }
+    // 1b. Reached the name path (no exact-uid match) → a uid-bearing row is off
+    // limits: it can only be closed by its exact-uid sale. Keep only uid-less
+    // rows. A uid-less non-RW variant sale can no longer touch a held RW row.
+    candidates = candidates.filter(p => p.uid == null);
+    if (!candidates.length) return null;
     // 2. Value guard: drop candidates a near-zero-proceeds sale couldn't be.
     const net = Number(sell.saleNet);
     if (Number.isFinite(net) && net > 0) {
