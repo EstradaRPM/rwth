@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.225
+// @version      0.3.226
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.225';
+  const SCRIPT_VERSION = '0.3.226';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1553,6 +1553,59 @@
   const RW_TRADE_RARITIES = ['yellow', 'orange', 'red'];
   function scanHitIsRwTradeable(hit) {
     return RW_TRADE_RARITIES.indexOf(String((hit && hit.rarity) || '').toLowerCase()) !== -1;
+  }
+
+  // Pure: apply the itemdetails rarity verdict to a preview built by
+  // buildScanPreview, given the buys AFTER itemdetails resolved their per-instance
+  // rarity. This is the layer that finally kills the non-RW sale phantom (see
+  // scan-uid-discriminator), and it does so structurally rather than with any uid
+  // rule — because a non-RW weapon is non-stackable and carries a REAL armoury uid
+  // exactly like the RW one, so no uid test can separate them. Rarity can.
+  //
+  // The ordering problem it solves: buildScanPreview matches every sale to a buy by
+  // uid/name BEFORE rarity is known (rarity only arrives from a per-uid itemdetails
+  // call). On a blank import a sale can only match a buy staged in the SAME batch,
+  // so when that buy is now dropped as standard/non-RW, the sale that closed it is a
+  // non-RW sale too — yet it is still sitting in preview.sales, and confirmScan
+  // records every imported sale into Recent Transactions even when its matched row
+  // is gone. So: drop every non-RW buy, and every sale whose matchedId pointed at
+  // one of those dropped buys. Sales matched to a pre-existing open ledger row are
+  // untouched — those ids are real makeId rows, never a scan-buy: staged id.
+  function reconcileScanRarity(preview, enrichedBuys) {
+    const pv = preview || {};
+    const keptBuys = [];
+    const rarityDropped = [];
+    const droppedBuyIds = new Set();
+    for (const h of enrichedBuys || []) {
+      if (scanHitIsRwTradeable(h)) { keptBuys.push(h); continue; }
+      const droppedId = scanBuyMatchId(h);
+      if (droppedId) droppedBuyIds.add(droppedId);
+      rarityDropped.push({
+        type: 'ignored',
+        itemName: h.itemName,
+        reason: `standard/non-RW (rarity ${scanDebugVal(h.rarity)})`,
+        eventKeys: h.eventKeys || [h.eventKey || h.key],
+      });
+    }
+    const keptSales = [];
+    const saleDropped = [];
+    for (const s of (pv.sales || [])) {
+      if (s && droppedBuyIds.has(s.matchedId)) {
+        saleDropped.push({
+          type: 'ignored',
+          itemName: s.sell && s.sell.itemName,
+          reason: 'non-RW sale — matched buy dropped as standard/non-RW',
+          eventKeys: s.eventKeys || [],
+        });
+      } else keptSales.push(s);
+    }
+    const staged = { ...pv, buys: [], sales: keptSales,
+      ignored: [...(pv.ignored || []), ...rarityDropped, ...saleDropped] };
+    staged.summary = { ...(pv.summary || {}),
+      sales: keptSales.length,
+      ignored: ((pv.summary && pv.summary.ignored) || 0)
+        + rarityDropped.length + saleDropped.length };
+    return { keptBuys, staged, rarityDropped, saleDropped };
   }
 
   function scanHitFromBuy(entry, key, source, itemNames, cats, logType) {
@@ -7003,26 +7056,15 @@
       // and rows whose lookup never resolved (no rarity = no useful row anyway).
       // Dropped rows surface as IGNORED so the count stays honest; their event
       // keys are already in preview.eventKeys, so commit still marks them seen.
-      const keptBuys = [];
-      const rarityDropped = [];
-      for (const h of enriched) {
-        if (scanHitIsRwTradeable(h)) keptBuys.push(h);
-        else rarityDropped.push({
-          type: 'ignored',
-          itemName: h.itemName,
-          reason: `standard/non-RW (rarity ${scanDebugVal(h.rarity)})`,
-          eventKeys: h.eventKeys || [h.eventKey || h.key],
-        });
-      }
+      // Apply the itemdetails rarity verdict (the true RW test) to the preview,
+      // dropping non-RW buys AND any sale that buildScanPreview matched to one of
+      // them before rarity was known. See reconcileScanRarity.
+      const { keptBuys, staged: reconciled } = reconcileScanRarity(preview, enriched);
 
       // #17 — non-blocking warning when a log-type page came back full (may be
       // truncated; this slice does not paginate).
       const pageWarnings = pageFullWarnings(pageCounts, SCAN_LOG_LIMIT);
-      const staged = { ...preview, buys: [],
-        warnings: pageWarnings,
-        ignored: [...(preview.ignored || []), ...rarityDropped] };
-      staged.summary = { ...(preview.summary || {}),
-        ignored: ((preview.summary && preview.summary.ignored) || 0) + rarityDropped.length };
+      const staged = { ...reconciled, warnings: pageWarnings };
       const scanDebugSummary = logTypeAudit
         .concat(rawSamples, rawItemSampleLines())
         .concat(buildScanDebugSummary(keptBuys, staged, cats, detailDebug, failedLogs));
@@ -12139,6 +12181,7 @@
     reconcileTradeGroup,
     tradeUser,
     scanHitIsRwTradeable,
+    reconcileScanRarity,
     buildScanPreview,
     buildScanPreviewUi,
     buildScanSettingsPopup,

@@ -495,6 +495,88 @@ test('a uid-less scanned sale cannot close a uid-less ledger row (the $190k Enfi
   assert.strictEqual(preview.ignored[0].reason, 'non-RW sale — no armoury uid');
 });
 
+test('a non-RW weapon carries a REAL uid — uid cannot gate it; rarity reconciliation kills the sale (the recurring Enfield phantom)', () => {
+  // The insight every prior uid patch missed: a standard Torn weapon is
+  // NON-stackable and carries a real armoury uid exactly like its RW namesake. So a
+  // non-RW Enfield BUY and its own SALE share one real uid — buildScanPreview
+  // uid-exact matches them and stages the sale. No uid rule can stop that; the two
+  // records are genuinely the same instance. Rarity is the only true RW
+  // discriminator, and it lands only AFTER matching (from a per-uid itemdetails
+  // call). reconcileScanRarity applies that verdict: it drops the non-RW buy AND
+  // the sale that matched it, so nothing reaches Recent Transactions.
+  const itemNames = { 219: 'Enfield SA-80' };
+  const c = { 'enfield sa-80': 'Primary' };
+  const buy = P.classifyLogEvent({
+    id: 'enfield-buy', timestamp: 1783000000,
+    data: { items: [{ id: 219, uid: 555 }], cost_total: 200_000 },
+  }, P.SCAN_LOG_TYPES.itemMarketBuy, 'enfield-buy', itemNames, c);
+  const sale = P.classifyLogEvent({
+    id: 'enfield-sale', timestamp: 1783100000,
+    data: { items: [{ id: 219, uid: 555 }], cost_total: 190_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'enfield-sale', itemNames, c);
+
+  const preview = P.buildScanPreview([buy, sale], { cats: c, itemNames, items: [], transactions: [] });
+  // BEFORE rarity is known the phantom exists: the sale uid-exact matched the buy.
+  assert.strictEqual(preview.buys.length, 1);
+  assert.strictEqual(preview.sales.length, 1, 'uid matching alone cannot stop the non-RW sale');
+  assert.match(preview.sales[0].matchedId, /^scan-buy:/);
+
+  // itemdetails resolves the standard weapon with no colour rarity (stays null).
+  const enriched = preview.buys.map(h => ({ ...h, rarity: null }));
+  const { keptBuys, staged } = P.reconcileScanRarity(preview, enriched);
+
+  assert.strictEqual(keptBuys.length, 0, 'the non-RW buy is dropped by rarity');
+  assert.strictEqual(staged.sales.length, 0, 'and its orphaned sale is dropped too — no phantom transaction');
+  assert.strictEqual(staged.summary.sales, 0);
+  const droppedSale = staged.ignored.find(r => r.reason === 'non-RW sale — matched buy dropped as standard/non-RW');
+  assert.ok(droppedSale, 'the sale is moved to ignored, not committed');
+});
+
+test('reconcileScanRarity keeps a genuine RW sale whose buy resolves to a colour rarity', () => {
+  const itemNames = { 219: 'Enfield SA-80' };
+  const c = { 'enfield sa-80': 'Primary' };
+  const buy = P.classifyLogEvent({
+    id: 'rw-buy', timestamp: 1783000000,
+    data: { item: { id: 219, uid: 777 }, final_price: 50_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'rw-buy', itemNames, c);
+  const sale = P.classifyLogEvent({
+    id: 'rw-sale', timestamp: 1783100000,
+    data: { items: [{ id: 219, uid: 777 }], cost_total: 60_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'rw-sale', itemNames, c);
+
+  const preview = P.buildScanPreview([buy, sale], { cats: c, itemNames, items: [], transactions: [] });
+  assert.strictEqual(preview.sales.length, 1);
+
+  const enriched = preview.buys.map(h => ({ ...h, rarity: 'yellow' }));
+  const { keptBuys, staged } = P.reconcileScanRarity(preview, enriched);
+
+  assert.strictEqual(keptBuys.length, 1);
+  assert.strictEqual(staged.sales.length, 1, 'the RW sale survives reconciliation');
+});
+
+test('reconcileScanRarity leaves a sale matched to a pre-existing open ledger row untouched', () => {
+  // A sale can match a real ledger row (a vetted RW row with a makeId id) instead
+  // of a staged buy. Dropping a same-batch non-RW buy must never collateral-drop it.
+  const itemNames = { 219: 'Enfield SA-80' };
+  const c = { 'enfield sa-80': 'Primary' };
+  const sale = P.classifyLogEvent({
+    id: 'ledger-sale', timestamp: 1783100000,
+    data: { items: [{ id: 219, uid: 888 }], cost_total: 60_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'ledger-sale', itemNames, c);
+
+  const preview = P.buildScanPreview([sale], {
+    cats: c, itemNames,
+    items: [{ id: 'real-row', itemName: 'Enfield SA-80', uid: 888, status: 'held', bonuses: [] }],
+    transactions: [],
+  });
+  assert.strictEqual(preview.sales.length, 1);
+  assert.strictEqual(preview.sales[0].matchedId, 'real-row');
+
+  // No staged buys in this batch → reconcile drops nothing.
+  const { staged } = P.reconcileScanRarity(preview, []);
+  assert.strictEqual(staged.sales.length, 1, 'a ledger-row match is never touched by rarity reconciliation');
+});
+
 test('matchSell value guard still backstops the pure uid-less legacy case', () => {
   // Two uid-less rows (legacy / hand-entered) share a name; a near-zero sale must
   // not close the expensive one — the value guard is the only signal left here.
