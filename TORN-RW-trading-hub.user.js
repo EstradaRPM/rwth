@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.220
+// @version      0.3.221
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.220';
+  const SCRIPT_VERSION = '0.3.221';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1765,6 +1765,10 @@
       eventKeys: [], mugSuppress: [],
     };
     const tradeGroups = new Map();
+    // Sales are NOT matched inline — they're collected here and matched in a
+    // uid-priority post-pass after every buy (log + trade) has been staged into
+    // saleMatchItems. See the post-pass below for why order matters.
+    const pendingSales = [];
     const addEventKeys = (keys) => {
       for (const k of keys || []) if (k && !preview.eventKeys.includes(k)) preview.eventKeys.push(k);
     };
@@ -1814,26 +1818,10 @@
         }
         addEventKeys(eventKeys);
       } else if (row.type === 'sale') {
-        const sell = row.sell || {};
-        const matched = matchSell(sell, saleMatchItems);
-        enrichSellBonus(sell, matched);
-        // MATCHED-ONLY IMPORT. A scanned sale log carries no rarity and no bonus
-        // (only the buy / armoury instance does), and once the item leaves the
-        // inventory itemdetails can't resolve it either — so a sale has NO
-        // per-instance RW signal of its own. The only proof it is the RW variant
-        // (not the identical-named plain-market variant: DBK, Enfield, …) is that
-        // it CLOSES an open/staged RW ledger row via matchSell (uid, else name +
-        // value guard). So import matched sales only. An unmatched sale — a non-RW
-        // dump OR a real RW sale whose buy was never tracked — is dropped to
-        // IGNORED, never staged, so no non-RW variant can slip in and post
-        // phantom income. (Untracked-buy RW sales must be added by hand.)
-        if (!matched) {
-          preview.ignored.push({ type: 'ignored', reason: 'unmatched sale — no tracked RW buy', eventKeys, itemName: sell.itemName });
-        } else {
-          const duplicate = txSeen.has(txKey(sell));
-          if (!duplicate) txSeen.add(txKey(sell));
-          preview.sales.push({ sell, matchedId: matched.id, duplicate, checked: true, eventKeys });
-        }
+        // Defer to the uid-priority post-pass below — do NOT match inline. Matching
+        // here would let a sale close a row in stream order, before a later-scanned
+        // sale that names the same instance by uid (e.g. a trade) gets its turn.
+        pendingSales.push({ sell: row.sell || {}, eventKeys });
         addEventKeys(eventKeys);
       } else if (row.type === 'mug') {
         // #15/B3 — $0 mugs carry no P/L. They were previously staged, skipped at
@@ -1864,24 +1852,63 @@
       }
       if (trade.type === 'buy') preview.buys.push(trade.hit);
       else if (trade.type === 'sale') {
-        const sell = trade.sell || {};
-        // Match against the SAME pool the log-sales draw from (open rows + staged
-        // buys), so a buy scanned in this same pass can be closed by a trade sale —
-        // and the value guard sees the staged buy's cost either way.
-        const matched = matchSell(sell, saleMatchItems);
-        enrichSellBonus(sell, matched);
-        // Matched-only, same as the log-sale path above: a trade sale with no
-        // tracked RW buy to close is dropped to IGNORED rather than imported.
-        if (!matched) {
-          preview.ignored.push({ type: 'ignored', reason: 'unmatched trade sale — no tracked RW buy', eventKeys, itemName: sell.itemName });
-        } else {
-          const duplicate = txSeen.has(txKey(sell));
-          if (!duplicate) txSeen.add(txKey(sell));
-          preview.sales.push({ sell, matchedId: matched.id, duplicate, checked: true, eventKeys });
-        }
+        // Collect for the same uid-priority post-pass. A trade sale carries the
+        // armoury uid, so it MUST get first claim on its exact instance before a
+        // uid-less same-name variant sale (item market / bazaar) can name-grab the
+        // row — the exact "non-RW Enfield stole the RW Enfield's sale" bug.
+        pendingSales.push({ sell: trade.sell || {}, eventKeys, trade: true });
       } else if (trade.type === 'ignored') preview.ignored.push(trade);
       else preview.review.push(trade);
       addEventKeys(eventKeys);
+    }
+    // ─── UID-PRIORITY SALE MATCHING ──────────────────────────────────────────
+    // Every buy (log + trade) is now staged into saleMatchItems, so match the
+    // collected sales here — uid-bearing sales FIRST, uid-less sales second.
+    //
+    // Why order matters: a sale that names an armoury uid can be tied to its exact
+    // instance unequivocally (matchSell step 1a). A uid-less sale can only match by
+    // name + value guard, which cannot tell an RW instance from its identical-named
+    // plain variant (DBK, Enfield, …). If a uid-less non-RW variant sale is matched
+    // FIRST it steals the held RW row; the real RW sale — which came through a
+    // channel that DID carry the uid (a trade, an auction) — then finds nothing to
+    // close. Matching uid sales first, and CONSUMING each closed row (splice) so no
+    // second sale can re-close it, makes the exact instance win and leaves the
+    // uid-less variant with no candidate. This is what finally kills the recurring
+    // "non-RW Enfield imported as the RW Enfield's sale" bug — structurally, not by
+    // tuning the value guard.
+    //
+    // MATCHED-ONLY IMPORT is preserved: a sale that closes no open/staged RW row is
+    // dropped to IGNORED (a non-RW dump, OR a real RW sale whose buy was never
+    // tracked). A sale carries no rarity/bonus of its own, so closing a tracked RW
+    // row is its only proof of being the RW variant. (Untracked-buy RW sales are
+    // added by hand.)
+    const orderedSales = pendingSales.filter(s => s.sell && s.sell.uid != null)
+      .concat(pendingSales.filter(s => !(s.sell && s.sell.uid != null)));
+    for (const pend of orderedSales) {
+      const sell = pend.sell;
+      const matched = matchSell(sell, saleMatchItems);
+      enrichSellBonus(sell, matched);
+      if (!matched) {
+        preview.ignored.push({ type: 'ignored',
+          reason: pend.trade ? 'unmatched trade sale — no tracked RW buy' : 'unmatched sale — no tracked RW buy',
+          eventKeys: pend.eventKeys, itemName: sell.itemName });
+        continue;
+      }
+      // A uid-exact match is exclusive: that armoury instance is definitively
+      // sold, so CONSUME the row (splice it out) — no later sale (a uid-less
+      // same-name variant, or a re-logged entry) can re-close it. A name-only
+      // match is a guess that may legitimately be one of several identical
+      // uid-less legacy rows, so it is left in the pool; txKey dedup below still
+      // flags a genuine re-log as a duplicate at commit.
+      const uidExact = sell.uid != null && matched.uid != null
+        && String(sell.uid) === String(matched.uid);
+      if (uidExact) {
+        const idx = saleMatchItems.indexOf(matched);
+        if (idx !== -1) saleMatchItems.splice(idx, 1);
+      }
+      const duplicate = txSeen.has(txKey(sell));
+      if (!duplicate) txSeen.add(txKey(sell));
+      preview.sales.push({ sell, matchedId: matched.id, duplicate, checked: true, eventKeys: pend.eventKeys });
     }
     preview.summary = {
       buys: preview.buys.length,

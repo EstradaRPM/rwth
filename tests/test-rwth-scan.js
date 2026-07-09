@@ -458,6 +458,76 @@ test('buildScanPreview value guard protects a staged buy from a cheap uid-less s
   assert.ok(dropped, 'the cheap non-RW sale is dropped to ignored');
 });
 
+test('the RW trade sale wins its instance; a uid-less non-RW variant sale cannot steal it', () => {
+  // THE recurring bug, reproduced end to end on a blank ledger in one scan:
+  //   - a RW Enfield/DBK is bought at auction (carries uid 555),
+  //   - it actually sells via a TRADE (the trade item leg carries the same uid),
+  //   - and a plain non-RW variant of the same name is dumped on the item market
+  //     with NO uid, for a price that clears the value guard.
+  // Before uid-priority matching, the uid-less item-market sale was matched first
+  // (main loop runs before the trade loop) and stole the RW row; the real trade
+  // sale then had nothing to close. Now the uid trade sale claims the instance
+  // first and consumes the row, so the non-RW sale is dropped to IGNORED.
+  const buy = P.classifyLogEvent({
+    id: 'buy-rw-trade', timestamp: 1779280000,
+    data: { item: { id: 614, uid: 555, name: 'Diamond Bladed Knife' }, final_price: 100_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'buy-rw-trade', {}, cats);
+
+  // Non-RW item-market sale: no uid, 30m net — clears the 20m (20%) value guard,
+  // so ONLY uid-priority (not the guard) can stop it stealing the RW row.
+  const nonRwSale = P.classifyLogEvent({
+    id: 'sale-nonrw-imarket', timestamp: 1779300000,
+    data: { item: [{ id: 614, name: 'Diamond Bladed Knife' }], net: 30_000_000, buyer: 'Rando' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'sale-nonrw-imarket', {}, cats);
+
+  // The real RW sale, via trade — item leg (uid 555, outgoing) + money leg (incoming).
+  const tradeItem = P.classifyLogEvent({
+    id: 'trade-item-out', timestamp: 1779372185, title: 'Trade items outgoing',
+    data: { items: [{ id: 614, uid: 555, name: 'Diamond Bladed Knife' }], trade_id: 'T1', user_id: 1580562 },
+  }, P.SCAN_LOG_TYPES.tradeItemA, 'trade-item-out', {}, cats);
+  const tradeMoney = P.classifyLogEvent({
+    id: 'trade-money-in', timestamp: 1779372185, title: 'Trade money incoming',
+    data: { money: 90_000_000, trade_id: 'T1', user_id: 1580562 },
+  }, P.SCAN_LOG_TYPES.tradeMoneyA, 'trade-money-in', {}, cats);
+
+  const preview = P.buildScanPreview([buy, nonRwSale, tradeItem, tradeMoney],
+    { cats, items: [], transactions: [], itemNames: {} });
+
+  // Exactly one sale imports — the 90m trade sale — closing the RW buy.
+  assert.strictEqual(preview.sales.length, 1);
+  assert.strictEqual(preview.sales[0].sell.saleNet, 90_000_000);
+  assert.strictEqual(preview.sales[0].sell.venue, 'trade');
+  // The uid-less non-RW item-market sale is dropped, not staged as income.
+  const dropped = preview.ignored.find(r => r.reason === 'unmatched sale — no tracked RW buy');
+  assert.ok(dropped, 'the uid-less non-RW variant sale is dropped to ignored');
+});
+
+test('a matched row is consumed so a second same-name sale cannot re-close it', () => {
+  // Two identical RW instances bought (uid 700, 701); two uid-bearing sales close
+  // them one-to-one. Without consumption both sales would collide on the first row.
+  const buy1 = P.classifyLogEvent({
+    id: 'b700', timestamp: 1779280000,
+    data: { item: { id: 614, uid: 700, name: 'Diamond Bladed Knife' }, final_price: 80_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'b700', {}, cats);
+  const buy2 = P.classifyLogEvent({
+    id: 'b701', timestamp: 1779280001,
+    data: { item: { id: 614, uid: 701, name: 'Diamond Bladed Knife' }, final_price: 80_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'b701', {}, cats);
+  const sale1 = P.classifyLogEvent({
+    id: 's700', timestamp: 1779300000,
+    data: { item: [{ id: 614, uid: 700, name: 'Diamond Bladed Knife' }], net: 90_000_000, buyer: 'A' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 's700', {}, cats);
+  const sale2 = P.classifyLogEvent({
+    id: 's701', timestamp: 1779300001,
+    data: { item: [{ id: 614, uid: 701, name: 'Diamond Bladed Knife' }], net: 90_000_000, buyer: 'B' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 's701', {}, cats);
+
+  const preview = P.buildScanPreview([buy1, buy2, sale1, sale2], { cats, items: [], transactions: [] });
+  assert.strictEqual(preview.sales.length, 2);
+  const ids = preview.sales.map(s => s.matchedId);
+  assert.strictEqual(new Set(ids).size, 2, 'the two sales close two distinct rows');
+});
+
 test('buildScanPreview ignores an unrelated bazaar sale that is not an RW item', () => {
   // Selling something that isn't RW armor/weapon (drugs, plushies, junk) — its
   // name is absent from the cats index, so it resolves to no category. With no
