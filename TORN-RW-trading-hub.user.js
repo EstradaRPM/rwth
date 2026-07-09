@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.227
+// @version      0.3.228
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.227';
+  const SCRIPT_VERSION = '0.3.228';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -7078,7 +7078,7 @@
       // Apply the itemdetails rarity verdict (the true RW test) to the preview,
       // dropping non-RW buys AND any sale that buildScanPreview matched to one of
       // them before rarity was known. See reconcileScanRarity.
-      const { keptBuys, staged: reconciled } = reconcileScanRarity(preview, enriched);
+      const { keptBuys, staged: reconciled, rarityDropped } = reconcileScanRarity(preview, enriched);
 
       // #17 — non-blocking warning when a log-type page came back full (may be
       // truncated; this slice does not paginate).
