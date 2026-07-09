@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.226
+// @version      0.3.227
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.226';
+  const SCRIPT_VERSION = '0.3.227';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4421,6 +4421,25 @@
     const bonuses = (item.bonuses || []).filter(b => b && b.name);
     const chips = bonuses.map((b, i) =>
       `<div style="margin-top: ${i === 0 ? 7 : 4}px;">${forumChip(b, t)}</div>`).join('');
+    // Quality rides below the bonus chips as a muted card (matching the profile
+    // signature catalogue), so it reads as secondary to the primary-coloured
+    // bonuses. Both quality and rarity are already stored on the ledger row from
+    // the scan — the forum card just never surfaced them before.
+    const qualityChip = item.quality != null
+      ? `<div style="margin-top: ${bonuses.length ? 4 : 7}px;">`
+        + `<span style="display: inline-block; background: ${t.bgChipMuted}; color: ${t.textSoft}; `
+        + `font-size: 10px; font-weight: bold; letter-spacing: 0.16em; text-transform: uppercase; `
+        + `padding: 4px 9px; border-radius: 2px;">${escapeAttr(item.quality)}% Quality</span></div>`
+      : '';
+    // Rarity tag sits inline after the name, same as sigItemCard. Unknown rarity
+    // yields '' (rarityColor returns '') so the tag is simply omitted.
+    const rarity = String(item.rarity || '').toLowerCase();
+    const rar = rarityColor(rarity, t);
+    const rarityTag = (rarity && rar)
+      ? `<span style="display: inline-block; color: ${rar}; font-size: 10px; font-weight: bold; `
+        + `letter-spacing: 0.14em; text-transform: uppercase; padding-left: 10px; vertical-align: middle;">`
+        + `&#9670; ${escapeAttr(rarity)}</span>`
+      : '';
     const img = (item.gyazoUrl || '').trim();
     const imgRow = img
       ? `<tr><td style="background: ${t.bgDeep}; padding: 0; line-height: 0; border: 0;">`
@@ -4435,7 +4454,7 @@
       + `<table ${TBL} width="100%" style="border: 0; border-collapse: collapse;"><tbody><tr>`
       + `<td style="text-align: left; vertical-align: middle; border: 0;">`
       + `<div style="color: ${t.accent}; font-size: 17px; font-weight: bold; letter-spacing: 0.04em; line-height: 1.2;">`
-      + `${escapeAttr(item.itemName)}</div>${chips}</td>`
+      + `${escapeAttr(item.itemName)}${rarityTag}</div>${chips}${qualityChip}</td>`
       + `<td style="text-align: right; vertical-align: middle; white-space: nowrap; padding-left: 14px; border: 0;">`
       + `<span style="color: ${t.primary}; font-size: 22px; font-weight: bold; letter-spacing: 0.02em; `
       + `font-family: Consolas, 'Courier New', monospace;">${escapeAttr(fmtMoney(item.listPrice))}</span></td>`
