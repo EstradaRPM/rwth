@@ -834,6 +834,7 @@ test('buildScanPreview stages a mug as flat cash, not tied to any item', () => {
       eventKey: scanEventKey(SCAN_LOG_TYPES.bazaarSale, 'sale-1'),
       sell: {
         itemName: 'Riot Body',
+        uid: 990,
         bonusName: 'Impregnable',
         saleNet: 84150000,
         timestamp: soldAt,
@@ -848,7 +849,8 @@ test('buildScanPreview stages a mug as flat cash, not tied to any item', () => {
       },
     },
   ], {
-    items: [openHeld],
+    // The RW sale names its armoury uid; the held instance carries the same uid.
+    items: [{ ...openHeld, uid: 990 }],
     cats: { 'riot body': 'Armor' },
     transactions: [],
   });

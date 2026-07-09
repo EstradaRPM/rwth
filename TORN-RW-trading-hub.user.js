@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.224
+// @version      0.3.225
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.224';
+  const SCRIPT_VERSION = '0.3.225';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1902,6 +1902,26 @@
       .concat(pendingSales.filter(s => !(s.sell && s.sell.uid != null)));
     for (const pend of orderedSales) {
       const sell = pend.sell;
+      // GROUND-TRUTH GATE (see scan-uid-discriminator): a ranked-war instance is
+      // unique and carries a REAL armoury uid on EVERY sale channel — auction
+      // (4322), item-market sell (1113), bazaar sell (1226), and the trade item
+      // leg (4445/4446). A standard/non-RW variant of the same name is stackable
+      // and sells with NO uid (bazaar reports uid 0, item market null; both read
+      // as null here). So a uid-less SCANNED sale is, definitionally, a non-RW
+      // dump — it can never be an RW instance and must never close a row. Drop it
+      // outright BEFORE matchSell: the old name-path (uid-less sale → uid-less
+      // row) was the last leak, letting a $190k plain Enfield close a uid-less
+      // Enfield row (a stale/manual/legacy row, or a same-name non-RW buy staged
+      // in this very batch) that the uid filter and value guard don't protect.
+      // This kills the recurring "non-RW variant imported as the RW sale" bug
+      // structurally. (The paste-a-sale flow calls matchSell directly and still
+      // matches uid-less pasted lines by name — this gate is scan-only.)
+      if (sell.uid == null) {
+        preview.ignored.push({ type: 'ignored',
+          reason: pend.trade ? 'non-RW trade sale — no armoury uid' : 'non-RW sale — no armoury uid',
+          eventKeys: pend.eventKeys, itemName: sell.itemName });
+        continue;
+      }
       const matched = matchSell(sell, saleMatchItems);
       enrichSellBonus(sell, matched);
       if (!matched) {
