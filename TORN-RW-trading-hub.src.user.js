@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.236
+// @version      0.3.237
 // @description  Trader's workbench for ranked-war armor & weapon flipping - ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.236';
+  const SCRIPT_VERSION = '0.3.237';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1622,8 +1622,16 @@
     const keptBuys = [];
     const rarityDropped = [];
     const droppedBuyIds = new Set();
+    // Index kept buys by their staged match id so a sale closed by a same-batch
+    // buy can inherit the bonus name that only arrived with itemdetails (below).
+    const keptBuyById = new Map();
     for (const h of enrichedBuys || []) {
-      if (scanHitIsRwTradeable(h)) { keptBuys.push(h); continue; }
+      if (scanHitIsRwTradeable(h)) {
+        keptBuys.push(h);
+        const keptId = scanBuyMatchId(h);
+        if (keptId) keptBuyById.set(keptId, h);
+        continue;
+      }
       const droppedId = scanBuyMatchId(h);
       if (droppedId) droppedBuyIds.add(droppedId);
       rarityDropped.push({
@@ -1643,7 +1651,14 @@
           reason: 'non-RW sale — matched buy dropped as standard/non-RW',
           eventKeys: s.eventKeys || [],
         });
-      } else keptSales.push(s);
+      } else {
+        // buildScanPreview enriched this sale's bonus BEFORE itemdetails ran, so a
+        // sale closing a same-batch buy came out blank (the buy's bonuses were []
+        // at match time). Now that the buy carries its real bonuses, backfill the
+        // sale so Recent Transactions shows "(Pinpoint)" instead of losing it.
+        if (s) enrichSellBonus(s.sell, keptBuyById.get(s.matchedId));
+        keptSales.push(s);
+      }
     }
     const staged = { ...pv, buys: [], sales: keptSales,
       ignored: [...(pv.ignored || []), ...rarityDropped, ...saleDropped] };

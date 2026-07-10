@@ -554,6 +554,37 @@ test('reconcileScanRarity keeps a genuine RW sale whose buy resolves to a colour
   assert.strictEqual(staged.sales.length, 1, 'the RW sale survives reconciliation');
 });
 
+test('reconcileScanRarity backfills the bonus name onto a sale closed by a same-batch buy', () => {
+  // The batch-import bug: buildScanPreview enriches a sale's bonus from its matched
+  // buy BEFORE itemdetails runs, so a sale closing a buy staged in the SAME batch
+  // comes out blank (the buy's bonuses were [] at match time). Once itemdetails
+  // resolves the buy's real bonuses, reconcileScanRarity must copy that name onto
+  // the sale — otherwise Recent Transactions loses the bonus for every scanned sale.
+  const itemNames = { 219: 'Enfield SA-80' };
+  const c = { 'enfield sa-80': 'Primary' };
+  const buy = P.classifyLogEvent({
+    id: 'rw-buy', timestamp: 1783000000,
+    data: { item: { id: 219, uid: 777 }, final_price: 50_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'rw-buy', itemNames, c);
+  const sale = P.classifyLogEvent({
+    id: 'rw-sale', timestamp: 1783100000,
+    data: { items: [{ id: 219, uid: 777 }], cost_total: 60_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'rw-sale', itemNames, c);
+
+  const preview = P.buildScanPreview([buy, sale], { cats: c, itemNames, items: [], transactions: [] });
+  assert.strictEqual(preview.sales.length, 1);
+  // At preview time the buy had no bonuses, so the sale came out blank.
+  assert.strictEqual(preview.sales[0].sell.bonusName == null, true);
+
+  // itemdetails resolves the buy: colour rarity AND the per-instance bonus.
+  const enriched = preview.buys.map(h => ({ ...h, rarity: 'yellow', bonuses: [{ name: 'Pinpoint', value: 10 }] }));
+  const { staged } = P.reconcileScanRarity(preview, enriched);
+
+  assert.strictEqual(staged.sales.length, 1);
+  assert.strictEqual(staged.sales[0].sell.bonusName, 'Pinpoint',
+    'the sale inherits the buy bonus so Recent Transactions shows it');
+});
+
 test('reconcileScanRarity leaves a sale matched to a pre-existing open ledger row untouched', () => {
   // A sale can match a real ledger row (a vetted RW row with a makeId id) instead
   // of a staged buy. Dropping a same-batch non-RW buy must never collateral-drop it.
