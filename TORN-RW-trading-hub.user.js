@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.232
+// @version      0.3.233
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.232';
+  const SCRIPT_VERSION = '0.3.233';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4828,15 +4828,20 @@
         if (pid) linkLines.push(`[<a href="https://www.torn.com/bazaar.php?userId=${pid}#/">Bazaar</a>]`);
         if (forum) linkLines.push(`[<a href="${forum}">Forum</a>]`);
       }
-      // Chat is a teaser, not a catalogue — show at most the 3 priciest, then a
-      // "+N more listed" line so the blurb stays short enough to actually post.
-      const CHAT_LIMIT = 3;
+      // Adaptive item count (v0.3.233): the blurb keeps as many top-ranked
+      // listings as actually fit under 125 chars — no fixed item cap. Short
+      // names / prices-off ⇒ more listings surface; long lines ⇒ fewer, with the
+      // rest collapsed into "+N more listed". CHAT_MAX_ITEMS is only a defensive
+      // scan ceiling, set far above what 125 rendered chars can ever hold (a bare
+      // "[S] X" line is ~6 chars), so it never actually caps a real blurb.
+      const CHAT_MAX_ITEMS = 20;
       // Torn's chat input caps a post at 125 rendered characters (HTML markup
-      // does not count). With 3 items + a "+N more" line the tail — the
-      // Bazaar/Forum links — got truncated. To fit: first shed item prices
-      // (from the cheapest listing up, only while show-price is ON), and only
-      // drop a whole listing once every price is already gone. Links are reserved
-      // budget, never dropped; bonuses are governed by the toggle (#36), not shed.
+      // does not count — visibleLen strips tags before counting). To fit: first
+      // shed item prices (from the cheapest listing up, only while show-price is
+      // ON), and only drop a whole listing once every price is already gone.
+      // Links are reserved budget, never dropped; bonuses are governed by the
+      // toggle (#36), not shed. The loop walks shown high→low, so the first
+      // assembly that fits is the maximum number of listings the budget allows.
       const CHAR_LIMIT = 125;
       // #37 — sort choice governs which listings lead. 'age' sorts by buyTimestamp
       // ascending (oldest-held first, for dumping stock); the default 'price' keeps
@@ -4845,7 +4850,7 @@
         ? (a, b) => (Number(a.buyTimestamp) || 0) - (Number(b.buyTimestamp) || 0)
         : (a, b) => (Number(b.listPrice) || 0) - (Number(a.listPrice) || 0);
       const sorted = (items || []).slice().sort(cmp);
-      const picks = sorted.slice(0, CHAT_LIMIT);
+      const picks = sorted.slice(0, CHAT_MAX_ITEMS);
       const visibleLen = (arr) => arr.join('\n').replace(/<[^>]+>/g, '').length;
       // shown = listings kept; dropped = how many of them show without a price
       // (the trailing/cheapest ones).

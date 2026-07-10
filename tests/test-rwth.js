@@ -1202,10 +1202,11 @@ test('#36 toChat: show-bonus% OFF keeps the name paren but drops the trailing pe
   }
 });
 
-test('#36 toChat: item count stays derived, capped at CHAT_LIMIT, +N more reflects drops', () => {
+test('#233 toChat: item count is adaptive — fills toward 125, no fixed 3-item cap', () => {
   const { AdvertiseGenerator } = globalThis.__RwthPure;
-  // Four short items, both toggles OFF → all lines minimal, so the cap (3) binds
-  // and the 4th collapses into "+1 more listed" — count is derived, not user-set.
+  // Four short items, both toggles OFF → all lines minimal. Under the old fixed
+  // CHAT_LIMIT=3 the 4th collapsed into "+1 more"; adaptive fits all four (they
+  // total well under 125), so nothing is dropped.
   const four = [
     { id: 'a', itemName: 'A1', bonuses: [], listPrice: 900000000 },
     { id: 'b', itemName: 'B2', bonuses: [], listPrice: 800000000 },
@@ -1213,12 +1214,24 @@ test('#36 toChat: item count stays derived, capped at CHAT_LIMIT, +N more reflec
     { id: 'd', itemName: 'D4', bonuses: [], listPrice: 600000000 },
   ];
   const out = AdvertiseGenerator.toChat(four, { shopName: 'S', chatShowPrice: false, chatShowBonus: false });
-  assert.strictEqual(chatItemCount(out), 3);     // never more than CHAT_LIMIT
-  assert.match(out, /\+1 more listed/);          // the drop is reported
-  // With bonuses + prices ON the same four items fit fewer lines, and "+N more"
-  // grows to match — the count derives from the active toggles, not a fixed N.
+  assert.strictEqual(chatItemCount(out), 4);     // all four fit — no 3-cap
+  assert.doesNotMatch(out, /more listed/);       // nothing dropped
+  // The count still DERIVES from the char budget: with bonuses + prices ON the
+  // same-priced armor lines are long, so only one fits and the rest collapse.
   const dense = AdvertiseGenerator.toChat(chatFitItems, chatFitSettings);
   assert.match(dense, /\+2 more listed/);
+  // And the budget genuinely binds: 20 short listings can't all fit 125 chars,
+  // so the fitter shows several and reports the remainder — never all 20.
+  const many = Array.from({ length: 20 }, (_, i) => ({
+    id: String(i), itemName: `W${i}`, bonuses: [], listPrice: (20 - i) * 1e8,
+  }));
+  const manyOut = AdvertiseGenerator.toChat(many, { shopName: 'S', chatShowPrice: false, chatShowBonus: false });
+  assert.ok(chatItemCount(manyOut) > 3, 'adaptive shows more than the old cap of 3');
+  assert.ok(chatItemCount(manyOut) < 20, 'but still bounded by the 125-char budget');
+  assert.match(manyOut, /more listed/);
+  for (const line of manyOut.split('\n')) {
+    assert.ok(line.replace(/<[^>]+>/g, '').length <= 125);
+  }
 });
 
 test('#36 buildAdvChatGear renders both toggles (default checked) and lights the dot when one is OFF', () => {
