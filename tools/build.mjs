@@ -43,7 +43,15 @@ const body = source.slice(endIdx + HEADER_END.length);
 const result = await minify(body, {
   compress: true,
   mangle: true,
-  format: { comments: false },
+  // ascii_only: escape every non-ASCII char (curly quotes, em-dashes, arrows,
+  // gear/emoji glyphs, box-drawing) as \uXXXX in the emitted string/identifier
+  // literals. Semantically identical JS, but the shipped file becomes pure
+  // 7-bit ASCII. Desktop Tampermonkey parsed the raw UTF-8 fine; TornPDA's
+  // WKWebView injection wrapper mangled the multi-byte bytes, breaking string
+  // literals mid-parse (the "Unexpected identifier 'Scan'" SyntaxError landed on
+  // the word right after `“…”` / `⚙`). ASCII-only output removes that whole
+  // class of injection-corruption failure. Do not drop this flag.
+  format: { comments: false, ascii_only: true },
 });
 
 if (result.error) {
