@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.233
+// @version      0.3.234
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.233';
+  const SCRIPT_VERSION = '0.3.234';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -585,11 +585,19 @@
         // summary strip stays visible.
         dashCharts: true,
         // Settings-tab sections (#311). "Advanced lists" starts folded.
-        setAccount: false, setReach: false,
-        setPricing: false, setAdvanced: true, setDiag: false,
+        setAccount: false,
+        setPricing: false, setAdvanced: true,
+        // S5 (settings UX) — the Developer drawer (weav3r test + data wipe)
+        // ships FOLDED so dev/destructive tooling is not inline among settings.
+        setDeveloper: true,
       },
       // #312 — which Settings `image` field has its URL popover open (null = none).
       settingsImgEdit: null,
+      // S1 (settings UX) — the last API-key Test outcome, so the connection card
+      // shows a PERSISTENT valid/invalid status (and a confirmed-identity chip)
+      // that survives a re-render, not just the ephemeral aria-live span. Shape:
+      // null (untested) | { ok:true, name, id } | { ok:false, msg }.
+      keyTest: null,
       // #325 — Advertise output surface switcher. advSurface picks which HTML
       // surface the "Copy to Torn" preview shows; advSurfaceRaw flips that
       // surface between the rendered preview and an editable raw-HTML textarea.
@@ -3841,40 +3849,35 @@
   // Section `key` indexes MEM.ui.collapsed; only "Advanced lists" is seeded
   // collapsed (see the MEM default). Render order = on-screen order.
   const SETTINGS_SCHEMA = [
-    {
-      title: 'Your Torn account', key: 'setAccount',
-      fields: [
-        { type: 'text', key: 'playerId', label: 'Your player ID',
-          placeholder: 'e.g. 1234567', lockWhenKey: true,
-          help: 'The number in your Torn profile link — used to tag your listings as yours.' },
-        { type: 'password', key: 'apiKey', label: 'Torn API key',
-          placeholder: 'Paste your RWTH key', testable: true,
-          help: `<a href="${RWTH_API_KEY_URL}" target="_blank" rel="noopener noreferrer">Create RWTH API key</a>. Covers buy/sale/mug scans + comps. Capped by Torn API limits; key stays local.` },
-      ],
-    },
-    {
-      // #324 — the content-bearing links (forum thread, weav3r price list) and
-      // all picture fields moved into the Advertise hub, alongside the post copy
-      // they appear in. Only the view-counter reach plumbing stays in Settings.
-      title: 'Post reach tracking', key: 'setReach',
-      fields: [
-        { type: 'url', key: 'viewCounterUrl', label: 'View-counter link',
-          placeholder: 'https://CODE.goatcounter.com/count',
-          help: 'Optional. Counts how many people open your posts. Leave blank to skip.' },
-      ],
-    },
+    // S1 (settings UX) — the required-setup `setAccount` fields (Torn API key +
+    // Player ID) no longer live in this generic section loop. They are lifted
+    // into a dedicated, non-fold `buildConnectionCard` at the top of the tab so
+    // the key → identity dependency reads key-first. See buildConnectionCard.
+    // #39 (S2) — the `setReach` section is deleted. Its single field, the
+    // view-counter reach URL, moved onto the Advertise surface gear
+    // (buildAdvSurfaceGear) — the output it actually feeds via counterPixel. The
+    // stored key `viewCounterUrl` is unchanged; only WHERE it is edited moved, so
+    // no hydrate() migration is needed and counterPixel output is byte-identical.
     {
       title: 'Pricing brain', key: 'setPricing',
+      // S3 (settings UX, PRD §3.2 decision 3) — the flat mix is split into two
+      // LABELED groups via inline `group` fields (schema-driven, no bespoke
+      // markup): "Where suggestions show" (the two surface toggles) and "How
+      // they're tuned" (the two percents + the quality default). The two number
+      // fields carry `effect: true` so renderSettingField prints a live effect
+      // echo (pricingEffectHint) beside the box instead of a bare number.
       fields: [
+        { type: 'group', label: 'Where suggestions show' },
         { type: 'toggle', path: 'enabled.auction', label: 'Suggest prices while browsing auctions',
           help: 'Show buy/sell guidance as you look through RW auctions.' },
         { type: 'toggle', path: 'enabled.ledger', label: 'Suggest prices on items you own',
           help: 'Show the same guidance on your ledger items.' },
+        { type: 'group', label: "How they're tuned" },
         { type: 'number', path: 'mugBuffer', label: 'Mug safety cushion (%)',
-          min: 0, max: 100, step: 1,
+          min: 0, max: 100, step: 1, effect: true,
           help: 'Extra wiggle room so a price still works even if the seller could be mugged. Higher = more cautious.' },
         { type: 'number', path: 'marginTarget', label: 'Profit goal (%)',
-          min: 0, max: 200, step: 1,
+          min: 0, max: 200, step: 1, effect: true,
           help: 'How much profit over what you paid before the hub calls something a good buy.' },
         { type: 'toggle', path: 'qualityClampDefault', label: 'Use tightest quality gate by default',
           help: 'Start new price-check cards at ±5 quality points instead of the normal ±10 point window.' },
@@ -3883,34 +3886,63 @@
     {
       title: 'Advanced lists', key: 'setAdvanced',
       fields: [
-        { type: 'textarea', id: 'rwth-intel-trash', label: 'Bonuses to always skip', rows: 2,
+        // S4 (settings UX, PRD §3.2 decision 4) — each textarea carries a `kind`
+        // so renderSettingField can wrap it with a PARSE-RESULT SUMMARY
+        // ("N saved · M ignored", advListParseSummary) — a malformed line no
+        // longer vanishes silently — and a SEED/OVERRIDE split note
+        // (buildAdvSeedNote) that flags shipped defaults apart from user edits.
+        { type: 'textarea', id: 'rwth-intel-trash', kind: 'trash', label: 'Bonuses to always skip', rows: 2,
           placeholder: 'cupid, achilles, …',
           help: 'Items with any of these bonuses are ignored before any price lookup. Comma- or line-separated.',
           value: (intel) => fmtTrashList(intel.excludedBonuses) },
-        { type: 'textarea', id: 'rwth-intel-bonus-change-dates', label: 'Bonus change dates', rows: 3,
+        { type: 'textarea', id: 'rwth-intel-bonus-change-dates', kind: 'bonusDates', label: 'Bonus change dates', rows: 3,
           placeholder: 'puncture: 2026-02-01',
           help: 'When a bonus was reworked, list it as "bonus: YYYY-MM-DD". Sales older than that date are dropped from price comparisons.',
           value: (intel) => fmtBonusChangeDates(BONUS_CHANGE_DATES_SEED, intel.bonusChangeDates) },
-        { type: 'textarea', id: 'rwth-intel-similar-bases', label: 'Similar-item groups', rows: 4,
+        { type: 'textarea', id: 'rwth-intel-similar-bases', kind: 'similar', label: 'Similar-item groups', rows: 4,
           placeholder: 'macana, dbk, metal_nunchakus, kodachi, samurai, yasukuni, katana',
           help: 'Group look-alike items (one group per line) so the hub can borrow a stronger and a weaker neighbour when its own sales are thin.',
           value: (intel) => fmtSimilarBases(SIMILAR_BASES_SEED, intel.similarBases) },
       ],
     },
-    {
-      title: 'Diagnostics', key: 'setDiag',
-      fields: [
-        { type: 'action', action: 'smoke-weav3r', label: 'Test weav3r connection', ghost: true,
-          title: 'Fires one request to weav3r and logs the response to the console (ADR-0003).',
-          help: 'For troubleshooting only — checks the hub can reach weav3r. The result shows in the browser console.' },
-      ],
-    },
+    // S5 (settings UX, PRD §3.2 decision 5) — the old `setDiag` "Diagnostics"
+    // section (weav3r smoke test) and the trailing "Clear all data (testing)"
+    // wipe button now live together in the folded Developer drawer, built by
+    // `buildDeveloperDrawer` outside this generic schema loop.
   ];
 
   // Resolve a dotted intel path, e.g. 'enabled.auction' → intel.enabled.auction.
   function readIntelPath(intel, path) {
     return String(path).split('.')
       .reduce((o, k) => (o == null ? undefined : o[k]), intel);
+  }
+
+  // S3 (settings UX, PRD §3.2 decision 3) — a plain-language echo of what a
+  // pricing percent actually does, computed live from the field's own value
+  // against a round $10m reference deal. PURE (ADR-0002): value in, sentence
+  // out; no DOM, no network. It only DESCRIBES the effect — the real pricing
+  // math (PricingEngine.resolveSettings + the Advertise item-market mug markup)
+  // owns the numbers and is untouched here. Unknown field or non-numeric value
+  // → '' so renderSettingField can drop the echo cleanly.
+  function pricingEffectHint(field, value) {
+    // A blank/absent box echoes nothing (Number('') is 0, so guard it here).
+    if (value == null || String(value).trim() === '') return '';
+    const pct = Number(value);
+    if (!Number.isFinite(pct)) return '';
+    const REF = 10_000_000;                       // a round $10m reference deal
+    const money = (n) => {
+      const m = n / 1e6;
+      return '$' + (Number.isInteger(m) ? String(m) : m.toFixed(1)) + 'm';
+    };
+    const grossed = money(REF * (1 + pct / 100));
+    switch (field) {
+      case 'mugBuffer':
+        return `Pads a ${money(REF)} sale up to ~${grossed} so a mug can't wipe your profit.`;
+      case 'marginTarget':
+        return `A ${money(REF)} buy needs to clear ~${grossed} to hit this goal.`;
+      default:
+        return '';
+    }
   }
 
   // The single field-type → HTML site. Every field in SETTINGS_SCHEMA is pure
@@ -3972,13 +4004,26 @@
           ${help}
         </div>`;
       }
-      case 'number':
+      case 'group':
+        // S3 — a labeled sub-heading that groups the fields beneath it. Pure
+        // data in the schema (no bespoke markup at the call sites).
+        return `<div class="rwth-field-group"><span class="rwth-field-group-label">${f.label}</span></div>`;
+      case 'number': {
+        const numVal = readIntelPath(intel, f.path);
+        // S3 — number fields flagged `effect` render a live plain-language echo
+        // (pricingEffectHint) of what the percent does, refreshed every render
+        // as the value changes, in place of a bare box.
+        const echo = f.effect
+          ? `<span class="rwth-field-effect" data-role="effect-echo">${pricingEffectHint(f.path, numVal)}</span>`
+          : '';
         return `<label class="rwth-field">
           <span class="rwth-field-label">${f.label}</span>
           <input class="rwth-field-input" type="number" min="${f.min}" max="${f.max}" step="${f.step}"
-                 data-intel="${f.path}" value="${escapeAttr(readIntelPath(intel, f.path))}">
+                 data-intel="${f.path}" value="${escapeAttr(numVal)}">
+          ${echo}
           ${help}
         </label>`;
+      }
       case 'toggle': {
         // A toggle binds to MEM.intel via a dotted `path`, or to MEM.settings
         // via `key` (#314 — the weav3r auto-build switch lives in settings).
@@ -3993,14 +4038,25 @@
           ${help}
         </div>`;
       }
-      case 'textarea':
+      case 'textarea': {
+        // S4 — the textarea keeps its raw blob (non-goal to rewrite as chips),
+        // but gains a parse-result summary and a seed/override split beneath it.
+        const raw = f.value(intel);
+        const summary = f.kind
+          ? `<span class="rwth-adv-list-summary" id="${f.id}-summary" data-role="adv-list-summary">${
+              fmtAdvListSummary(advListParseSummary(f.kind, raw))}</span>`
+          : '';
+        const seedNote = f.kind ? buildAdvSeedNote(f.kind, intel) : '';
         return `<div class="rwth-field">
           <span class="rwth-field-label">${f.label}</span>
           ${help}
           <textarea class="rwth-field-input" id="${f.id}" rows="${f.rows || 2}"
                     style="width:100%;font-family:inherit;"
-                    placeholder="${escapeAttr(f.placeholder || '')}">${escapeAttr(f.value(intel))}</textarea>
+                    placeholder="${escapeAttr(f.placeholder || '')}">${escapeAttr(raw)}</textarea>
+          ${summary}
+          ${seedNote}
         </div>`;
+      }
       case 'action':
         return `<div class="rwth-field">
           <div class="rwth-settings-actions">
@@ -4073,6 +4129,10 @@
   }
   // v0.3.0 slice 19a (#285) — `bonus: YYYY-MM-DD` per line. User overrides
   // shown alongside the in-code seed so the user sees what's already active.
+  // The accept predicate: a case-insensitive `name: YYYY-MM-DD` (or `=`) line.
+  // Shared with the S4 parse-result summary so the "saved vs ignored" count
+  // can never drift from what parseBonusChangeDates actually keeps.
+  const BONUS_CHANGE_LINE_RE = /^([a-z][a-z0-9_\- ]*?)\s*[:=]\s*(\d{4}-\d{2}-\d{2})\s*$/i;
   function fmtBonusChangeDates(seed, overrides) {
     const merged = { ...seed, ...(overrides || {}) };
     return Object.keys(merged).sort()
@@ -4081,7 +4141,7 @@
   function parseBonusChangeDates(text, seed) {
     const out = {};
     String(text || '').split(/\n+/).forEach((line) => {
-      const m = String(line).trim().match(/^([a-z][a-z0-9_\- ]*?)\s*[:=]\s*(\d{4}-\d{2}-\d{2})\s*$/i);
+      const m = String(line).trim().match(BONUS_CHANGE_LINE_RE);
       if (!m) return;
       const key = m[1].trim().toLowerCase();
       const iso = m[2];
@@ -4114,6 +4174,99 @@
     });
     return out;
   }
+
+  // ── S4 (settings UX, PRD §3.2 decision 4) — Advanced-lists feedback layer ────
+  // A PRESENTATION + FEEDBACK layer over the parse*/fmt* pairs above. It changes
+  // NO stored value and NO parse semantics — it only reports what the existing
+  // parsers already decide. PURE (ADR-0002): text/value in → plain data or an
+  // HTML string out; no DOM, no network. Two jobs:
+  //   1. advListParseSummary — count how many raw lines/tokens the matching
+  //      parse* would ACCEPT vs. silently drop, so a malformed
+  //      `bonus: YYYY-MM-DD` line surfaces as "… · 1 ignored" instead of just
+  //      vanishing. Each `kind` mirrors its parser's own accept/reject rule.
+  //   2. advSeedSplit / buildAdvSeedNote — separate the in-code SEED lines from
+  //      the user's overrides so shipped defaults read as distinct from edits.
+  function advListParseSummary(kind, text) {
+    const raw = String(text == null ? '' : text);
+    if (kind === 'trash') {
+      // parseTrashList lower-cases + de-dups; a raw token it collapses (blank or
+      // duplicate) is "ignored". Compare raw non-empty tokens to survivors.
+      const tokens = raw.split(/[\s,;\n]+/).map(t => t.trim()).filter(Boolean);
+      const saved = parseTrashList(raw).length;
+      return { saved, ignored: Math.max(0, tokens.length - saved) };
+    }
+    if (kind === 'bonusDates') {
+      // A line parseBonusChangeDates keeps is one matching BONUS_CHANGE_LINE_RE;
+      // any other non-blank line is silently dropped there — here it is counted.
+      let saved = 0, ignored = 0;
+      raw.split(/\n+/).forEach((line) => {
+        const t = line.trim();
+        if (!t) return;
+        if (BONUS_CHANGE_LINE_RE.test(t)) saved++; else ignored++;
+      });
+      return { saved, ignored };
+    }
+    if (kind === 'similar') {
+      // parseSimilarBases keeps lines with ≥2 comma tokens; a shorter non-blank
+      // line is dropped. (Seed-duplicate lines still parse as valid rules here.)
+      let saved = 0, ignored = 0;
+      raw.split(/\n+/).forEach((line) => {
+        if (!line.trim()) return;
+        const tokens = line.split(/[,]+/).map(x => x.trim()).filter(Boolean);
+        if (tokens.length < 2) ignored++; else saved++;
+      });
+      return { saved, ignored };
+    }
+    return { saved: 0, ignored: 0 };
+  }
+
+  // "N saved · M ignored" — the one-line verdict shown beneath each editor.
+  function fmtAdvListSummary(summary) {
+    const s = summary || {};
+    const saved = Number(s.saved) || 0;
+    const ignored = Number(s.ignored) || 0;
+    return `${saved} saved · ${ignored} ignored`;
+  }
+
+  // Split an editor's active rules into the in-code SEED lines and the user's
+  // OVERRIDE lines, each formatted exactly as the matching fmt* would render
+  // them, so the render layer can label shipped defaults apart from edits.
+  function advSeedSplit(kind, seed, overrides) {
+    const seedLines = [];
+    const userLines = [];
+    if (kind === 'bonusDates') {
+      const sd = seed || {};
+      Object.keys(sd).sort().forEach(k => seedLines.push(`${k}: ${sd[k]}`));
+      const ov = overrides || {};
+      Object.keys(ov).sort().forEach(k => userLines.push(`${k}: ${ov[k]}`));
+    } else if (kind === 'similar') {
+      (seed || []).forEach(c => seedLines.push((c || []).join(', ')));
+      (overrides || []).forEach(c => userLines.push((c || []).join(', ')));
+    } else if (kind === 'trash') {
+      // Trash has no in-code seed (PRD #265) — every entry is the user's.
+      (overrides || []).forEach(v => userLines.push(String(v)));
+    }
+    return { seedLines, userLines };
+  }
+
+  // HTML for the seed/override split note beneath a `kind` textarea. PURE: reads
+  // the module SEED constants + intel and returns a string. Only renders when
+  // there IS a shipped seed to distinguish (trash has none → '').
+  function buildAdvSeedNote(kind, intel) {
+    const it = intel || {};
+    let seed = null, overrides = null;
+    if (kind === 'bonusDates') { seed = BONUS_CHANGE_DATES_SEED; overrides = it.bonusChangeDates; }
+    else if (kind === 'similar') { seed = SIMILAR_BASES_SEED; overrides = it.similarBases; }
+    else if (kind === 'trash') { overrides = it.excludedBonuses; }
+    const { seedLines, userLines } = advSeedSplit(kind, seed, overrides);
+    if (!seedLines.length) return '';   // nothing shipped → nothing to flag
+    const row = (cls, tag, line) =>
+      `<div class="rwth-adv-seed-line ${cls}"><span class="rwth-adv-seed-tag">${tag}</span>${escapeAttr(line)}</div>`;
+    const seedRows = seedLines.map(l => row('is-shipped', 'Shipped', l)).join('');
+    const userRows = userLines.map(l => row('is-user', 'Yours', l)).join('');
+    return `<div class="rwth-adv-seed-note" data-role="adv-seed-note">${seedRows}${userRows}</div>`;
+  }
+
   // Resolve adjacency: find the first cluster (seed ∪ overrides) that contains
   // a token matching itemName, then return up to one neighbour on each side.
   // A token matches when its underscore-stripped form is a substring of the
@@ -4156,6 +4309,83 @@
     }
     return tok.replace(/\b\w/g, ch => ch.toUpperCase());
   }
+  // S1 (settings UX, PRD §3.2 decision 1) — the required-setup connection card.
+  // Pure/string-only (ADR-0002): the Test click, syncKeyLock, and render() side
+  // effects stay in the impure layer. Rendered non-fold at the TOP of Settings.
+  //
+  // Key-first: the Torn API key input + inline Test come first, carrying a
+  // PERSISTENT valid/invalid/untested status derived from `hasRealApiKey` +
+  // `ui.keyTest` (the last Test outcome) — so the result survives a re-render,
+  // unlike the ephemeral `#rwth-key-test-status` aria-live span (kept, for the
+  // in-flight "Checking…" announcement). The Player ID is demoted to a confirmed
+  // identity chip beneath the key ("✓ Signed in as <name> [<id>]"), degrading to
+  // a manual Player ID input only when there is no real key or the last Test
+  // failed — making the key → identity dependency visible.
+  function buildConnectionCard(s, ui) {
+    const set = s || {};
+    const u = ui || {};
+    const keyPresent = hasRealApiKey(set.apiKey);
+    const test = u.keyTest || null;                    // { ok, name, id } | { ok:false, msg } | null
+    const failed = Boolean(test && test.ok === false);
+
+    // Persistent key status pill (not only the aria-live span).
+    let statusMod, statusText;
+    if (test && test.ok)      { statusMod = 'valid';    statusText = '✓ Key valid'; }
+    else if (failed)          { statusMod = 'invalid';  statusText = '✕ Key invalid'; }
+    else if (keyPresent)      { statusMod = 'untested'; statusText = '• Key not tested'; }
+    else                      { statusMod = 'untested'; statusText = '• No key yet'; }
+
+    // Optional persisted detail from a failed Test (visible without a re-Test).
+    const failMsg = failed && test.msg
+      ? `<span class="rwth-conn-detail">${escapeAttr(test.msg)}</span>` : '';
+
+    const keyBlock = `<label class="rwth-field">
+      <span class="rwth-field-label">Torn API key</span>
+      <input class="rwth-field-input" type="password" data-setting="apiKey"
+             value="${escapeAttr(set.apiKey)}" placeholder="Paste your RWTH key"
+             autocomplete="off" spellcheck="false">
+      <div class="rwth-key-test">
+        <button class="rwth-btn-sm" type="button" data-action="test-key">Test</button>
+        <span class="rwth-conn-status rwth-conn-status--${statusMod}">${statusText}</span>
+        <span id="rwth-key-test-status" class="rwth-key-test-status" role="status" aria-live="polite"></span>
+      </div>
+      ${failMsg}
+      <span class="rwth-field-help"><a href="${RWTH_API_KEY_URL}" target="_blank" rel="noopener noreferrer">Create RWTH API key</a>. Covers buy/sale/mug scans + comps. Capped by Torn API limits; key stays local.</span>
+    </label>`;
+
+    // Identity: a confirmed chip once a real key is present and the last Test did
+    // not fail; otherwise the manual Player ID input returns (the S1 degrade).
+    const showChip = keyPresent && !failed;
+    let identityBlock;
+    if (showChip) {
+      const pid = String(set.playerId == null ? '' : set.playerId).trim();
+      const name = test && test.ok ? String(test.name || '').trim() : '';
+      const who = name
+        ? `Signed in as ${escapeAttr(name)}${pid ? ` [${escapeAttr(pid)}]` : ''}`
+        : (pid ? `Signed in [${escapeAttr(pid)}]` : 'Key set — hit Test to confirm your identity');
+      identityBlock = `<div class="rwth-field">
+        <span class="rwth-field-label">Identity</span>
+        <span class="rwth-conn-chip" data-role="identity-chip">✓ ${who}</span>
+      </div>`;
+    } else {
+      identityBlock = `<label class="rwth-field">
+        <span class="rwth-field-label">Your player ID</span>
+        <input class="rwth-field-input" type="text" data-setting="playerId"
+               value="${escapeAttr(set.playerId)}" placeholder="e.g. 1234567"
+               autocomplete="off" spellcheck="false">
+        <span class="rwth-field-help">The number in your Torn profile link — used to tag your listings as yours. Or paste a key above and hit Test to fill it in for you.</span>
+      </label>`;
+    }
+
+    return `<div class="rwth-settings-section rwth-conn-card">
+      <div class="rwth-conn-head"><span class="rwth-conn-title">Connection</span></div>
+      <div class="rwth-settings-section-body">
+        ${keyBlock}
+        ${identityBlock}
+      </div>
+    </div>`;
+  }
+
   function buildSettingsTab(mem) {
     const s = (mem && mem.settings) || {};
     const intel = (mem && mem.intel) || MEM.intel;
@@ -4170,25 +4400,70 @@
         collapseHead(sec.title, sec.key, collapsed, true)}${body}</div>`;
     }).join('');
     return `<div class="rwth-settings">
+      ${buildConnectionCard(s, ui)}
       ${sections}
-      <div class="rwth-settings-actions">
-        <button class="rwth-btn rwth-btn-danger" type="button" data-action="clear-data" title="Testing only: wipe all stored data and reload as a fresh install">Clear all data (testing)</button>
-      </div>
+      ${buildDeveloperDrawer(ui)}
     </div>`;
   }
 
+  // S5 (settings UX, PRD §3.2 decision 5) — the Developer drawer. Dev/destructive
+  // tooling (the weav3r connection smoke test + the full data wipe) lives here,
+  // FOLDED by default (MEM.ui.collapsed.setDeveloper seeds true), so it is not
+  // shipped inline among the everyday settings. PURE/string-only (ADR-0002): the
+  // fold toggle, the weav3r Test, and the typed-confirm wipe all run in the
+  // impure render layer. The weav3r test carries an INLINE STATUS span (reusing
+  // the `rwth-key-test-status` pattern) so its outcome is visible without
+  // devtools — today it is console-only. The wipe keeps its danger styling but
+  // is relabeled to its real intent ("Reset hub — wipe all stored data"; the
+  // "(testing)" label is dropped) and is gated behind a typed confirm
+  // (`isWipeConfirmed`) in the click handler before `clearAllData` runs.
+  function buildDeveloperDrawer(ui) {
+    const u = ui || {};
+    const fold = u.collapsed || {};
+    const collapsed = Boolean(fold.setDeveloper);
+    const body = collapsed ? '' : `<div class="rwth-settings-section-body">
+        <div class="rwth-field">
+          <div class="rwth-settings-actions">
+            <button class="rwth-btn rwth-btn-ghost" type="button" data-action="smoke-weav3r"
+                    title="Fires one request to weav3r and reports the response (ADR-0003).">Test weav3r connection</button>
+            <span id="rwth-weav3r-test-status" class="rwth-key-test-status" role="status" aria-live="polite"></span>
+          </div>
+          <span class="rwth-field-help">For troubleshooting only — checks the hub can reach weav3r. The result shows inline.</span>
+        </div>
+        <div class="rwth-field">
+          <div class="rwth-settings-actions">
+            <button class="rwth-btn rwth-btn-danger" type="button" data-action="clear-data"
+                    title="Wipe all stored hub data (ledger, transactions, settings, caches) and reload as a fresh install.">Reset hub — wipe all stored data</button>
+          </div>
+          <span class="rwth-field-help">Irreversible. Asks you to type <strong>${escapeAttr(WIPE_CONFIRM_WORD)}</strong> to confirm, then removes every stored hub value and reloads.</span>
+        </div>
+      </div>`;
+    return `<div class="rwth-settings-section">${
+      collapseHead('Developer', 'setDeveloper', collapsed, true)}${body}</div>`;
+  }
+
   // v0.2.0 slice 1 — third-party-API plumbing smoke test (ADR-0003).
-  // Fires one GM_xmlhttpRequest to weav3r and logs the response so we can
-  // confirm the @grant/@connect switch actually permits the call before any
-  // PricingEngine code is written. Result is console-only; no UI surface.
+  // Fires one GM_xmlhttpRequest to weav3r to confirm the @grant/@connect switch
+  // actually permits the call. S5 (settings UX) — the outcome is now reported on
+  // the INLINE STATUS span in the Developer drawer (the `rwth-key-test-status`
+  // pattern) as well as logged, so it is visible without opening devtools.
   function smokeWeav3r() {
     const url = 'https://weav3r.dev/ranked-weapons?tab=armor&armorSet=Riot';
+    const status = document.getElementById('rwth-weav3r-test-status');
+    const setStatus = (text, tone) => {
+      if (!status) return;
+      status.textContent = text;
+      status.classList.remove('rwth-key-test-ok', 'rwth-key-test-err');
+      if (tone) status.classList.add(tone);
+    };
     /* eslint-disable no-undef */
     if (typeof GM_xmlhttpRequest !== 'function') {
       console.error('[RWTH] smoke: GM_xmlhttpRequest unavailable — @grant not honoured');
+      setStatus('✕ Can’t reach weav3r — @grant not honoured.', 'rwth-key-test-err');
       return;
     }
     console.log('[RWTH] smoke: GET', url);
+    setStatus('Testing weav3r…', null);
     GM_xmlhttpRequest({
       method: 'GET',
       url,
@@ -4200,9 +4475,16 @@
           length: body.length,
           preview: body.slice(0, 400),
         });
+        const ok = res.status >= 200 && res.status < 400;
+        setStatus(
+          ok ? `✓ weav3r reachable (HTTP ${res.status}, ${body.length} bytes)`
+             : `✕ weav3r replied HTTP ${res.status}`,
+          ok ? 'rwth-key-test-ok' : 'rwth-key-test-err');
       },
-      onerror: (err) => console.error('[RWTH] smoke: error', err),
-      ontimeout: () => console.error('[RWTH] smoke: timeout'),
+      onerror: (err) => { console.error('[RWTH] smoke: error', err);
+        setStatus('✕ Could not reach weav3r — check your connection.', 'rwth-key-test-err'); },
+      ontimeout: () => { console.error('[RWTH] smoke: timeout');
+        setStatus('✕ weav3r timed out — try again.', 'rwth-key-test-err'); },
     });
     /* eslint-enable no-undef */
   }
@@ -5103,6 +5385,15 @@
     const raw = settings ? settings[field.key] : '';
     const val = raw == null ? '' : String(raw);
     const hasImg = !!val.trim();
+    // #39 (S2) — the view-counter reach URL migrated out of the retired Settings
+    // `setReach` section onto this output gear (the surface it feeds via
+    // counterPixel). It is one shared, global value applying to all three
+    // surfaces, so it renders in every surface's gear and binds via data-setting
+    // (keeping the `viewCounterUrl` key), persisting through persistSettingField /
+    // flushAdvGearInput exactly like the picture override — no plumbing change.
+    const reachRaw = settings ? settings.viewCounterUrl : '';
+    const reachVal = reachRaw == null ? '' : String(reachRaw);
+    const hasReach = !!reachVal.trim();
     const bannerRaw = settings ? settings.bannerImageUrl : '';
     const hasBanner = !!String(bannerRaw == null ? '' : bannerRaw).trim();
     const fallbackNote = hasImg ? '' : `<span class="rwth-field-help">${
@@ -5129,21 +5420,35 @@
           Show my RW items on this advert
         </label>`
       : '';
+    // #39 — the reach-tracking URL. Shared across all surfaces (feeds counterPixel
+    // for forum/bazaar/signature), so it renders in every surface gear.
+    const reachField = `<div class="rwth-form-title">Post reach</div>
+          <label class="rwth-field">
+            <span class="rwth-field-label">View-counter link</span>
+            <input class="rwth-field-input" type="url" data-setting="viewCounterUrl"
+                   value="${escapeAttr(reachVal)}" placeholder="https://CODE.goatcounter.com/count"
+                   autocomplete="off" spellcheck="false">
+            <span class="rwth-field-help">Optional. Counts how many people open your posts. Leave blank to skip.</span>
+          </label>`;
     const pop = open
       ? `<div class="rwth-adv-gear-pop">
           ${copyFields}
           ${imageField}
           ${bazaarItemsField}
+          ${reachField}
         </div>`
       : '';
+    // The dot lights when this surface carries any non-default output setting: a
+    // picture override for THIS surface, or the (global) reach URL (#39).
+    const dotLit = hasImg || hasReach;
     // Label the gear with the active surface so it reads as "settings for THIS
     // surface" and fills the left of the switcher's action row.
     const surfaceLabel = surface ? surface.charAt(0).toUpperCase() + surface.slice(1) : '';
     return `<div class="rwth-adv-gear">
-        <button class="rwth-gear-btn${open ? ' is-open' : ''}${hasImg ? ' has-img' : ''}" type="button"
+        <button class="rwth-gear-btn${open ? ' is-open' : ''}${dotLit ? ' has-img' : ''}" type="button"
                 data-action="toggle-adv-gear" aria-expanded="${open ? 'true' : 'false'}"
                 aria-label="${escapeAttr(surfaceLabel)} settings" title="${escapeAttr(surfaceLabel)} settings">⚙ <span class="rwth-gear-label">${surfaceLabel}</span>${
-          hasImg ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
+          dotLit ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
         ${pop}
       </div>`;
   }
@@ -6113,6 +6418,17 @@
       Store.set('rwth_intel_settings', MEM.intel);
       saved = true;
     }
+    // S4 — refresh the parse-result summary from the RAW textarea value (which
+    // stays in the DOM, malformed lines and all, since this path re-renders
+    // nothing). This is what makes a dropped `bonus: YYYY-MM-DD` line surface
+    // as "… · 1 ignored" the moment it is saved rather than vanishing silently.
+    const advKind = { 'rwth-intel-trash': 'trash',
+      'rwth-intel-bonus-change-dates': 'bonusDates',
+      'rwth-intel-similar-bases': 'similar' }[el.id];
+    if (advKind) {
+      const sumEl = document.getElementById(`${el.id}-summary`);
+      if (sumEl) sumEl.textContent = fmtAdvListSummary(advListParseSummary(advKind, el.value));
+    }
     if (saved) flashFieldSaved(el);
   }
 
@@ -6169,35 +6485,42 @@
     // Route through the Torn client (#1). It throws on the {error:…} envelope
     // (carrying .tornCode) and on transport failure — the two branches the old
     // raw-fetch path distinguished as "bad key" vs "could not reach".
+    // S1 — record the last Test outcome on MEM.ui so the connection card's
+    // PERSISTENT status pill (and the identity chip / manual-input degrade)
+    // survive a re-render, not only the ephemeral aria-live span. A failed Test
+    // is recorded without a re-render so the just-typed key stays in the input
+    // for correction; the persistent "✕ Key invalid" catches up on the next
+    // natural render. Success re-renders so the chip can show the resolved name.
+    const failTest = (msg) => {
+      MEM.ui = { ...MEM.ui, keyTest: { ok: false, msg } };
+      setStatus(msg, 'rwth-key-test-err');
+    };
+
     let who = null;
     try {
       who = pickUserIdentity(await Torn.user(key));
     } catch (err) {
-      setStatus(
-        err && err.tornCode != null
-          ? 'That key did not work — double-check you pasted the whole thing.'
-          : 'Could not reach Torn just now — check your connection and try again.',
-        'rwth-key-test-err');
+      failTest(err && err.tornCode != null
+        ? 'That key did not work — double-check you pasted the whole thing.'
+        : 'Could not reach Torn just now — check your connection and try again.');
       return;
     }
     if (!who) {
-      setStatus('That key did not work — double-check you pasted the whole thing.',
-                'rwth-key-test-err');
+      failTest('That key did not work — double-check you pasted the whole thing.');
       return;
     }
 
     const pid = who.id == null ? '' : String(who.id);
     setStatus(`✓ Connected as ${who.name} [${pid}]`, 'rwth-key-test-ok');
 
-    // Persist the verified key + auto-filled Player ID, then lock the field in
-    // place so the success status is not wiped by a re-render.
+    // Persist the verified key + auto-filled Player ID and the Test outcome, then
+    // re-render so the Player ID becomes a confirmed-identity chip (S1) instead of
+    // a primary input — the success status now lives in the persistent pill.
     const settings = { ...MEM.settings, apiKey: key, playerId: pid };
     Store.set('rwth_settings', settings);
     MEM.settings = settings;
-    const pidEl = document.querySelector('#rwth-content [data-setting="playerId"]');
-    if (pidEl) { pidEl.value = pid; pidEl.readOnly = true; }
-    const note = document.querySelector('#rwth-content .rwth-key-lock-note');
-    if (note) note.hidden = false;
+    MEM.ui = { ...MEM.ui, keyTest: { ok: true, name: who.name, id: pid } };
+    render();
   }
 
   // #312 — Toggle which Settings `image` field has its URL popover open. Pass a
@@ -7572,8 +7895,24 @@
   // Testing aid — wipe every rwth_ localStorage key (ledger, transactions,
   // settings, scan state, dict, caches) so the next load behaves like a fresh
   // install. Enumerates by prefix so it stays correct as new keys are added.
+  // S5 (settings UX, PRD §3.2 decision 5) — the word a user must type to
+  // authorize the full data wipe. Gates `clear-data` behind an explicit,
+  // intentional confirmation rather than a single OK click.
+  const WIPE_CONFIRM_WORD = 'RESET';
+
+  // PURE (ADR-0002) — does the typed input authorize the wipe? Case-insensitive
+  // and whitespace-tolerant so "reset" / " Reset " pass, but an empty/cancelled
+  // prompt (null) or any other text does not. Kept pure + exported so the gate
+  // logic is testable without a blocking prompt.
+  function isWipeConfirmed(input) {
+    return String(input == null ? '' : input).trim().toLowerCase()
+      === WIPE_CONFIRM_WORD.toLowerCase();
+  }
+
   function clearAllData() {
-    if (!confirm('Clear ALL RW Trading Hub data (ledger, transactions, settings, caches)? This cannot be undone. The page will reload.')) return;
+    const typed = prompt(
+      `This wipes ALL RW Trading Hub data (ledger, transactions, settings, caches) and reloads. This cannot be undone.\n\nType ${WIPE_CONFIRM_WORD} to confirm.`);
+    if (!isWipeConfirmed(typed)) return;
     try {
       const keys = [];
       for (let i = 0; i < localStorage.length; i++) {
@@ -8019,6 +8358,41 @@
         display: block; margin: -2px 0 2px;
         font: italic 400 10px var(--rwth-font-mono); color: var(--rwth-muted); letter-spacing: .2px;
       }
+      /* S3 — labeled group heading inside a settings section (Pricing brain). */
+      .rwth-field-group { margin-top: var(--rwth-gap-xs); }
+      .rwth-field-group:first-child { margin-top: 0; }
+      .rwth-field-group-label {
+        display: block; padding-bottom: 2px;
+        border-bottom: 1px solid var(--rwth-border-strong);
+        font: 700 10px var(--rwth-font-mono); color: var(--rwth-secondary);
+        letter-spacing: .6px; text-transform: uppercase;
+      }
+      /* S3 — the live effect echo beside a tuned pricing number. */
+      .rwth-field-effect {
+        font: 600 11px var(--rwth-font-mono); color: var(--rwth-accent); line-height: 1.4;
+      }
+      /* S4 — Advanced-lists parse-result summary + seed/override split note. */
+      .rwth-adv-list-summary {
+        font: 600 11px var(--rwth-font-mono); color: var(--rwth-secondary); letter-spacing: .2px;
+      }
+      .rwth-adv-seed-note {
+        display: flex; flex-direction: column; gap: 2px;
+        margin-top: 2px; padding: 4px 6px;
+        border: 1px dashed var(--rwth-border-strong); border-radius: var(--rwth-radius-ctl);
+      }
+      .rwth-adv-seed-line {
+        font: 11px var(--rwth-font-mono); color: var(--rwth-muted); line-height: 1.4;
+      }
+      .rwth-adv-seed-tag {
+        display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: var(--rwth-radius-ctl);
+        font: 700 9px var(--rwth-font-mono); letter-spacing: .5px; text-transform: uppercase;
+      }
+      .rwth-adv-seed-line.is-shipped .rwth-adv-seed-tag {
+        background: var(--rwth-secondary-strong); color: var(--rwth-bg);
+      }
+      .rwth-adv-seed-line.is-user .rwth-adv-seed-tag {
+        background: var(--rwth-accent); color: var(--rwth-bg);
+      }
       .rwth-field-input {
         background: #111; color: var(--rwth-text); border: 1px solid var(--rwth-border-strong);
         border-radius: var(--rwth-radius-ctl); padding: 6px 8px;
@@ -8045,6 +8419,27 @@
       .rwth-key-test-status.rwth-key-test-ok { color: var(--rwth-accent); }
       .rwth-key-test-status.rwth-key-test-err { color: var(--rwth-danger); }
       .rwth-key-lock-note { font-style: italic; }
+      /* S1 — the connection card: required setup, key-first, non-fold at top. */
+      .rwth-conn-card {
+        border: 1px solid var(--rwth-border-strong); border-radius: var(--rwth-radius-ctl);
+        padding: var(--rwth-gap-md); gap: var(--rwth-gap-sm);
+        background: rgba(255,255,255,.02);
+      }
+      .rwth-conn-head { display: flex; align-items: center; gap: var(--rwth-gap-sm); }
+      .rwth-conn-title {
+        font: 700 12px var(--rwth-font-mono); color: var(--rwth-accent); letter-spacing: .4px;
+      }
+      .rwth-conn-status { font: 700 11px var(--rwth-font-mono); letter-spacing: .2px; }
+      .rwth-conn-status--valid   { color: var(--rwth-accent); }
+      .rwth-conn-status--invalid { color: var(--rwth-danger); }
+      .rwth-conn-status--untested { color: var(--rwth-muted); }
+      .rwth-conn-detail { font: 600 11px var(--rwth-font-mono); color: var(--rwth-danger); }
+      .rwth-conn-chip {
+        display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+        padding: 4px 10px; border-radius: 999px;
+        background: rgba(0,255,160,.08); border: 1px solid var(--rwth-border-strong);
+        font: 700 12px var(--rwth-font-mono); color: var(--rwth-accent);
+      }
       .rwth-settings-divider { border: none; border-top: 1px solid var(--rwth-border-soft); margin: 8px 0; }
       .rwth-intel-row { display: flex; gap: var(--rwth-gap-lg); flex-wrap: wrap; margin-bottom: var(--rwth-gap-xs); }
       .rwth-intel-check { display: flex; align-items: center; gap: 6px; cursor: pointer;
@@ -12362,7 +12757,16 @@
     buildAdvTxGear,
     buildAdvItemsGear,
     buildAdvChatGear,
+    buildConnectionCard,
+    pricingEffectHint,
+    advListParseSummary,
+    fmtAdvListSummary,
+    advSeedSplit,
+    buildAdvSeedNote,
+    counterPixel,
     buildSettingsTab,
+    buildDeveloperDrawer,
+    isWipeConfirmed,
     buildScanChecklist,
     buildSellBox,
     buildContent,

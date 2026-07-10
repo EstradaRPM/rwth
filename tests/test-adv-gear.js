@@ -25,7 +25,7 @@ globalThis.document = {};
 
 require('../TORN-RW-trading-hub.user.js');
 
-const { buildAdvCopyFields, buildAdvSurfaceGear, advSurfaceImageField } = globalThis.__RwthPure;
+const { buildAdvCopyFields, buildAdvSurfaceGear, advSurfaceImageField, counterPixel } = globalThis.__RwthPure;
 
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -120,9 +120,10 @@ console.log('\nsignature gear — signature picture override only, thin by desig
   const html = buildAdvSurfaceGear('signature', settings, true, copyFixture);
   assert('shows the signature picture override', html.includes('data-setting="signatureImageUrl"'));
   assert('carries NO copy blocks', COPY_KEYS.every(k => !html.includes(`data-adv-copy="${k}"`)));
-  // No filler: the popover holds exactly one bound field (the picture URL).
+  // No filler: the popover holds exactly two bound fields — the picture URL and
+  // the shared reach URL (#39). No copy blocks on signature.
   const boundFields = (html.match(/data-setting=|data-adv-copy=/g) || []).length;
-  assert('exactly one bound control in the signature gear', boundFields === 1);
+  assert('exactly two bound controls in the signature gear', boundFields === 2);
 }
 
 console.log('\nclosed gear — no popover, no bound controls');
@@ -142,10 +143,73 @@ console.log('\ngear button — has-img dot reflects the surface picture');
   assert('no dot when the surface has no own override', !noImg.includes('rwth-gear-dot'));
 }
 
+// ── #39 (S2) — the reach URL migrated onto the surface gear ────────────────────
+
+console.log('\nreach URL — the view-counter link surfaces on every surface gear');
+{
+  for (const surface of ['forum', 'bazaar', 'signature']) {
+    const html = buildAdvSurfaceGear(surface, settings, true, copyFixture);
+    assert(`${surface} gear carries the reach URL control`,
+      html.includes('data-setting="viewCounterUrl"'));
+  }
+  // Closed gear builds no popover, so no reach binding leaks.
+  assert('closed gear has no reach binding',
+    !buildAdvSurfaceGear('forum', settings, false, copyFixture).includes('data-setting="viewCounterUrl"'));
+}
+
+console.log('\nreach URL — value prefills and escapes into the input');
+{
+  const html = buildAdvSurfaceGear('signature', { viewCounterUrl: 'a"<b&c' }, true, copyFixture);
+  assert('reach value is escaped into the value attribute',
+    html.includes('value="a&quot;&lt;b&amp;c"'));
+}
+
+console.log('\nreach URL — lights the gear dot even with no picture override');
+{
+  // No picture override anywhere, but a reach URL is set → the dot lights.
+  const reachOnly = buildAdvSurfaceGear('signature', { viewCounterUrl: 'https://x.goatcounter.com/count' }, false, copyFixture);
+  assert('dot lights when only the reach URL is set', reachOnly.includes('rwth-gear-dot'));
+  assert('gear picks up the accent has-img class from the reach URL', reachOnly.includes('has-img'));
+  // Neither a picture nor a reach URL → no dot.
+  const neither = buildAdvSurfaceGear('signature', {}, false, copyFixture);
+  assert('no dot when neither picture nor reach is set', !neither.includes('rwth-gear-dot'));
+  // A blank/whitespace reach URL does not light the dot.
+  const blank = buildAdvSurfaceGear('signature', { viewCounterUrl: '   ' }, false, copyFixture);
+  assert('whitespace-only reach URL does not light the dot', !blank.includes('rwth-gear-dot'));
+}
+
 console.log('\nadvSurfaceImageField — unknown surface falls back to forum');
 {
   assert('unknown surface maps to the forum field', advSurfaceImageField('nope').key === 'forumImageUrl');
   assert('bazaar maps to its own field', advSurfaceImageField('bazaar').key === 'bazaarImageUrl');
+}
+
+// ── #39 (S2) — counterPixel output must not change when the URL only moved ────
+// The reach URL migrated from Settings to the surface gear, but it still binds the
+// same `viewCounterUrl` key and counterPixel still reads it. These golden strings
+// pin the emitted pixel byte-for-byte so the relocation is provably output-neutral.
+
+console.log('\ncounterPixel — byte-for-byte golden output for a stored URL');
+{
+  const html = counterPixel({ viewCounterUrl: 'https://x.goatcounter.com/count' }, 'rwth-forum');
+  const expected = '<img src="https://x.goatcounter.com/count?p=%2Frwth-forum" '
+    + 'alt="" width="1" height="1" '
+    + 'style="width: 1px; height: 1px; border: 0; display: block;" '
+    + 'referrerpolicy="no-referrer">';
+  assert('exact pixel HTML for a simple counter URL', html === expected);
+
+  // A URL that already carries a query string uses `&` (escaped) as the separator.
+  const withQuery = counterPixel({ viewCounterUrl: 'https://x.goatcounter.com/count?a=1' }, 'rwth-bazaar');
+  const expectedQ = '<img src="https://x.goatcounter.com/count?a=1&amp;p=%2Frwth-bazaar" '
+    + 'alt="" width="1" height="1" '
+    + 'style="width: 1px; height: 1px; border: 0; display: block;" '
+    + 'referrerpolicy="no-referrer">';
+  assert('exact pixel HTML for a URL with an existing query', withQuery === expectedQ);
+
+  // No URL (blank/whitespace/missing) → empty string, no pixel emitted.
+  assert('empty when no counter URL is set', counterPixel({}, 'rwth-forum') === '');
+  assert('empty for a whitespace-only URL', counterPixel({ viewCounterUrl: '   ' }, 'rwth-forum') === '');
+  assert('empty when settings is missing', counterPixel(undefined, 'rwth-forum') === '');
 }
 
 // ── summary ───────────────────────────────────────────────────────────────────

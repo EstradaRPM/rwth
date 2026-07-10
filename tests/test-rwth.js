@@ -130,17 +130,22 @@ test('AuctionScanner sweep does not walk every li on the page', () => {
 });
 
 // #324 — the content-bearing link and picture fields moved into the Advertise
-// tab; Settings keeps account (playerId/apiKey) + reach (viewCounterUrl).
-test('buildSettingsTab renders the account and reach fields', () => {
+// tab; Settings keeps account (playerId/apiKey). #39 (S2) — the reach URL
+// (viewCounterUrl) moved onto the Advertise surface gear too.
+test('buildSettingsTab renders the account fields', () => {
   const { buildSettingsTab } = globalThis.__RwthPure;
   const html = buildSettingsTab({ settings: {} });
-  for (const key of ['playerId', 'viewCounterUrl', 'apiKey']) {
+  for (const key of ['playerId', 'apiKey']) {
     assert.match(html, new RegExp(`data-setting="${key}"`), `${key} field should render`);
   }
-  for (const gone of ['forumThreadUrl', 'weav3rPricelistUrl', 'forumHeaderImageUrl']) {
+  for (const gone of ['forumThreadUrl', 'weav3rPricelistUrl', 'forumHeaderImageUrl', 'viewCounterUrl']) {
     assert.doesNotMatch(html, new RegExp(`data-setting="${gone}"`),
                         `${gone} should no longer live in Settings`);
   }
+  // #39 (S2) — the whole `setReach` "Post reach tracking" section is deleted; the
+  // reach URL now lives on the Advertise surface gear.
+  assert.doesNotMatch(html, /data-collapse="setReach"/, 'setReach section header gone');
+  assert.doesNotMatch(html, /Post reach tracking/, 'reach section title gone');
 });
 
 test('buildSettingsTab pre-fills current values', () => {
@@ -152,7 +157,7 @@ test('buildSettingsTab pre-fills current values', () => {
 
 test('buildSettingsTab escapes values into the value attribute', () => {
   const { buildSettingsTab } = globalThis.__RwthPure;
-  const html = buildSettingsTab({ settings: { viewCounterUrl: 'a"<b&c' } });
+  const html = buildSettingsTab({ settings: { playerId: 'a"<b&c' } });
   assert.match(html, /value="a&quot;&lt;b&amp;c"/);
 });
 
@@ -173,6 +178,225 @@ test('buildSettingsTab masks the API key as a password field', () => {
   const { buildSettingsTab } = globalThis.__RwthPure;
   const html = buildSettingsTab({ settings: {} });
   assert.match(html, /type="password" data-setting="apiKey"/);
+});
+
+// ── S1: connection card (key-first + identity chip) ──────────────────────────
+// The required-setup fields are lifted out of the generic section loop into a
+// dedicated `buildConnectionCard`: key input FIRST, Player ID demoted to a
+// confirmed chip once a real key is present (degrading to a manual input only
+// with no real key / a failed Test).
+test('buildConnectionCard is exported as a pure string builder', () => {
+  const { buildConnectionCard } = globalThis.__RwthPure;
+  assert.strictEqual(typeof buildConnectionCard, 'function');
+  assert.strictEqual(typeof buildConnectionCard({}, {}), 'string');
+  assert.strictEqual(typeof buildConnectionCard(), 'string'); // tolerates no args
+});
+
+test('buildConnectionCard renders the API key input with its inline Test first', () => {
+  const { buildConnectionCard } = globalThis.__RwthPure;
+  const html = buildConnectionCard({}, {});
+  assert.match(html, /type="password" data-setting="apiKey"/);
+  assert.match(html, /data-action="test-key"/);
+  // The ephemeral aria-live span is kept (Test still writes its in-flight status).
+  assert.match(html, /id="rwth-key-test-status"/);
+  // The key block precedes the Player ID block (key-first ordering).
+  assert.ok(html.indexOf('data-setting="apiKey"') < html.indexOf('data-setting="playerId"'),
+    'the API key should render before the manual Player ID input');
+});
+
+test('buildConnectionCard: with a real key the Player ID is a read-only chip, no primary input', () => {
+  const { buildConnectionCard } = globalThis.__RwthPure;
+  const html = buildConnectionCard({ apiKey: 'a-real-rwth-key', playerId: '987654' }, {});
+  // The identity chip renders...
+  assert.match(html, /rwth-conn-chip/);
+  assert.match(html, /987654/);
+  // ...and there is NO primary Player ID text input to fill by hand.
+  assert.doesNotMatch(html, /data-setting="playerId"/);
+});
+
+test('buildConnectionCard: with no real key the manual Player ID input returns', () => {
+  const { buildConnectionCard } = globalThis.__RwthPure;
+  // Empty key → manual input.
+  assert.match(buildConnectionCard({ playerId: '123' }, {}), /data-setting="playerId"/);
+  // The PDA placeholder is not a real key → manual input returns too.
+  const pda = buildConnectionCard({ apiKey: '###PDA-APIKEY###', playerId: '123' }, {});
+  assert.match(pda, /data-setting="playerId"/);
+  assert.doesNotMatch(pda, /rwth-conn-chip/);
+});
+
+test('buildConnectionCard: a failed Test degrades the chip back to a manual input', () => {
+  const { buildConnectionCard } = globalThis.__RwthPure;
+  const html = buildConnectionCard(
+    { apiKey: 'a-real-rwth-key', playerId: '987654' },
+    { keyTest: { ok: false, msg: 'That key did not work.' } });
+  assert.match(html, /data-setting="playerId"/, 'manual input returns on a failed Test');
+  assert.doesNotMatch(html, /rwth-conn-chip/);
+  // The failure message persists (not only in the ephemeral aria-live span).
+  assert.match(html, /That key did not work\./);
+});
+
+test('buildConnectionCard: persistent status pill tracks hasRealApiKey + last Test', () => {
+  const { buildConnectionCard } = globalThis.__RwthPure;
+  // No key → untested.
+  assert.match(buildConnectionCard({}, {}), /rwth-conn-status--untested/);
+  // Real key, never tested → still untested (present but unverified).
+  assert.match(buildConnectionCard({ apiKey: 'k' }, {}), /rwth-conn-status--untested/);
+  // Last Test succeeded → valid.
+  assert.match(
+    buildConnectionCard({ apiKey: 'k' }, { keyTest: { ok: true, name: 'Bob', id: '5' } }),
+    /rwth-conn-status--valid/);
+  // Last Test failed → invalid.
+  assert.match(
+    buildConnectionCard({ apiKey: 'k' }, { keyTest: { ok: false, msg: 'bad' } }),
+    /rwth-conn-status--invalid/);
+});
+
+test('buildConnectionCard: a resolved Test shows the confirmed identity name + id in the chip', () => {
+  const { buildConnectionCard } = globalThis.__RwthPure;
+  const html = buildConnectionCard(
+    { apiKey: 'a-real-rwth-key', playerId: '987654' },
+    { keyTest: { ok: true, name: 'Duke', id: '987654' } });
+  assert.match(html, /Signed in as Duke \[987654\]/);
+});
+
+test('buildSettingsTab renders the connection card at the top and no longer folds account', () => {
+  const { buildSettingsTab } = globalThis.__RwthPure;
+  const html = buildSettingsTab({ settings: {} });
+  // The card is present...
+  assert.match(html, /rwth-conn-card/);
+  // ...and it precedes the generic collapsible sections (e.g. the pricing section).
+  assert.ok(html.indexOf('rwth-conn-card') < html.indexOf('data-collapse="setPricing"'),
+    'the connection card should render above the generic settings sections');
+  // The retired setAccount collapsible header no longer renders.
+  assert.doesNotMatch(html, /data-collapse="setAccount"/);
+});
+
+// ── Settings S3 — Pricing regroup + effect echo ──────────────────────────────
+test('setPricing renders the two labeled groups (where-shown vs. how-tuned)', () => {
+  const { buildSettingsTab } = globalThis.__RwthPure;
+  const html = buildSettingsTab({ settings: {} });
+  assert.match(html, /rwth-field-group-label">Where suggestions show</);
+  assert.match(html, /rwth-field-group-label">How they're tuned</);
+});
+
+test("setPricing group labels: 'How they're tuned' appears after 'Where suggestions show'", () => {
+  const { buildSettingsTab } = globalThis.__RwthPure;
+  const html = buildSettingsTab({ settings: {} });
+  const where = html.indexOf('Where suggestions show');
+  const how = html.indexOf("How they're tuned");
+  assert.ok(where >= 0 && how >= 0, 'both group labels render');
+  assert.ok(where < how, 'where-shown group precedes how-tuned group');
+});
+
+test('setPricing shows a live effect echo beside mugBuffer / marginTarget', () => {
+  const { buildSettingsTab } = globalThis.__RwthPure;
+  const html = buildSettingsTab({
+    settings: {},
+    intel: { enabled: { auction: true, ledger: true }, mugBuffer: 10, marginTarget: 5 },
+  });
+  // The echo spans are present and carry the computed sentences for the stored
+  // values (10% → $11m padded; 5% → $10.5m clear).
+  assert.match(html, /rwth-field-effect" data-role="effect-echo"/);
+  assert.match(html, /Pads a \$10m sale up to ~\$11m/);
+  assert.match(html, /A \$10m buy needs to clear ~\$10\.5m/);
+});
+
+test('pricingEffectHint is a pure helper on __RwthPure', () => {
+  const { pricingEffectHint } = globalThis.__RwthPure;
+  assert.strictEqual(typeof pricingEffectHint, 'function');
+});
+
+test('pricingEffectHint(mugBuffer) tracks the input value', () => {
+  const { pricingEffectHint } = globalThis.__RwthPure;
+  assert.match(pricingEffectHint('mugBuffer', 10), /~\$11m/);
+  assert.match(pricingEffectHint('mugBuffer', 20), /~\$12m/);
+  assert.match(pricingEffectHint('mugBuffer', 0), /~\$10m/);
+  // Different inputs yield different sentences (it is genuinely computed).
+  assert.notStrictEqual(pricingEffectHint('mugBuffer', 10), pricingEffectHint('mugBuffer', 20));
+});
+
+test('pricingEffectHint(marginTarget) tracks the input value', () => {
+  const { pricingEffectHint } = globalThis.__RwthPure;
+  assert.match(pricingEffectHint('marginTarget', 5), /~\$10\.5m/);
+  assert.match(pricingEffectHint('marginTarget', 15), /~\$11\.5m/);
+  assert.notStrictEqual(pricingEffectHint('marginTarget', 5), pricingEffectHint('marginTarget', 15));
+});
+
+test('pricingEffectHint returns "" for an unknown field or non-numeric value', () => {
+  const { pricingEffectHint } = globalThis.__RwthPure;
+  assert.strictEqual(pricingEffectHint('nope', 10), '');
+  assert.strictEqual(pricingEffectHint('mugBuffer', ''), '');
+  assert.strictEqual(pricingEffectHint('marginTarget', 'abc'), '');
+});
+
+// ── Settings S4 — Advanced lists validation + seed/override split ─────────────
+test('advListParseSummary / fmtAdvListSummary / advSeedSplit / buildAdvSeedNote are pure helpers on __RwthPure', () => {
+  const P = globalThis.__RwthPure;
+  assert.strictEqual(typeof P.advListParseSummary, 'function');
+  assert.strictEqual(typeof P.fmtAdvListSummary, 'function');
+  assert.strictEqual(typeof P.advSeedSplit, 'function');
+  assert.strictEqual(typeof P.buildAdvSeedNote, 'function');
+});
+
+test('advListParseSummary(bonusDates): a malformed line reports "1 ignored" instead of vanishing', () => {
+  const { advListParseSummary, fmtAdvListSummary } = globalThis.__RwthPure;
+  const s = advListParseSummary('bonusDates', 'puncture: 2026-02-01\nnot a real line');
+  assert.deepStrictEqual(s, { saved: 1, ignored: 1 });
+  assert.strictEqual(fmtAdvListSummary(s), '1 saved · 1 ignored');
+});
+
+test('advListParseSummary(bonusDates): all-valid lines report 0 ignored; blank lines are not counted', () => {
+  const { advListParseSummary } = globalThis.__RwthPure;
+  assert.deepStrictEqual(
+    advListParseSummary('bonusDates', 'puncture: 2026-02-01\n\nfury = 2025-11-15\n'),
+    { saved: 2, ignored: 0 });
+});
+
+test('advListParseSummary(trash): duplicate/blank tokens count as ignored', () => {
+  const { advListParseSummary } = globalThis.__RwthPure;
+  // Cupid + cupid collapse to one; blank filtered — 2 raw, 1 saved, 1 ignored.
+  assert.deepStrictEqual(advListParseSummary('trash', 'Cupid, cupid'), { saved: 1, ignored: 1 });
+  assert.deepStrictEqual(advListParseSummary('trash', 'cupid, achilles'), { saved: 2, ignored: 0 });
+});
+
+test('advListParseSummary(similar): a line with fewer than 2 tokens is ignored', () => {
+  const { advListParseSummary } = globalThis.__RwthPure;
+  assert.deepStrictEqual(
+    advListParseSummary('similar', 'macana, dbk, kodachi\nloner'),
+    { saved: 1, ignored: 1 });
+});
+
+test('advSeedSplit(bonusDates) separates the shipped seed from user overrides', () => {
+  const { advSeedSplit } = globalThis.__RwthPure;
+  const split = advSeedSplit('bonusDates', { puncture: '2026-02-01' }, { fury: '2025-11-15' });
+  assert.deepStrictEqual(split.seedLines, ['puncture: 2026-02-01']);
+  assert.deepStrictEqual(split.userLines, ['fury: 2025-11-15']);
+});
+
+test('buildAdvSeedNote flags the shipped bonus-change seed line as "Shipped"', () => {
+  const { buildAdvSeedNote } = globalThis.__RwthPure;
+  const html = buildAdvSeedNote('bonusDates', {});
+  assert.match(html, /rwth-adv-seed-line is-shipped/);
+  assert.match(html, /rwth-adv-seed-tag">Shipped</);
+  assert.match(html, /puncture: 2026-02-01/);
+});
+
+test('buildAdvSeedNote returns "" for the trash editor (no in-code seed to flag)', () => {
+  const { buildAdvSeedNote } = globalThis.__RwthPure;
+  assert.strictEqual(buildAdvSeedNote('trash', { excludedBonuses: ['cupid'] }), '');
+});
+
+test('buildSettingsTab renders a parse-result summary + shipped seed note for the advanced lists', () => {
+  const { buildSettingsTab } = globalThis.__RwthPure;
+  // setAdvanced is seeded collapsed; expand it so its body renders.
+  const html = buildSettingsTab({ settings: {}, intel: {}, ui: { collapsed: { setAdvanced: false } } });
+  // Each kind gets a summary span with a stable id the impure save path updates.
+  assert.match(html, /id="rwth-intel-bonus-change-dates-summary" data-role="adv-list-summary"/);
+  assert.match(html, /id="rwth-intel-trash-summary"/);
+  assert.match(html, /id="rwth-intel-similar-bases-summary"/);
+  // The shipped bonus seed renders in its own flagged split note.
+  assert.match(html, /data-role="adv-seed-note"/);
+  assert.match(html, /rwth-adv-seed-line is-shipped/);
 });
 
 // ── Ledger (slice 3) ─────────────────────────────────────────────────────────
