@@ -24,7 +24,7 @@ globalThis.__RWTH_TEST__ = true;            // tells the IIFE to skip DOM bootst
 globalThis.localStorage = makeMockStorage();
 globalThis.document = {};                   // stub; bootstrap is skipped, so unused
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { buildDeveloperDrawer, isWipeConfirmed, buildSettingsTab } = globalThis.__RwthPure;
 

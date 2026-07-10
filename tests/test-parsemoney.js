@@ -21,7 +21,7 @@ globalThis.__RWTH_TEST__ = true;
 globalThis.localStorage = makeMockStorage();
 globalThis.document = {};
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { parseMoney } = globalThis.__RwthPure;
 

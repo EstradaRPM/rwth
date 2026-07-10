@@ -29,7 +29,7 @@ globalThis.localStorage = makeMockStorage();
 globalThis.document = {};
 localStorage.setItem('rwth_settings', JSON.stringify({ apiKey: 'SETTINGSKEY12345' }));
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { Torn } = globalThis.__RwthPure;
 const GOOD_KEY = 'ABCDEF1234567890';
@@ -291,6 +291,6 @@ test('itemDetails gates on hasRealApiKey and unwraps the error envelope', async 
 // Sanity: the live userscript declares @connect api.torn.com (the one item the
 // PRD calls out to verify on auto-update).
 test('@connect api.torn.com is granted in the UserScript header', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'TORN-RW-trading-hub.user.js'), 'utf8');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'TORN-RW-trading-hub.src.user.js'), 'utf8');
   assert.match(src, /^\/\/ @connect\s+api\.torn\.com\s*$/m);
 });

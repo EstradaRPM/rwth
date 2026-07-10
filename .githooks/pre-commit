@@ -1,0 +1,15 @@
+#!/bin/sh
+# Regenerate the minified ship file from source on every commit, so
+# TORN-RW-trading-hub.user.js can never drift from the .src file.
+#
+# Only runs when the source (or the build itself) is part of this commit,
+# so unrelated commits stay fast. Enable once with: npm run setup-hooks
+
+if git diff --cached --name-only | grep -qE 'TORN-RW-trading-hub\.src\.user\.js|tools/build\.mjs'; then
+  echo "pre-commit: rebuilding minified userscript…"
+  node tools/build.mjs || {
+    echo "pre-commit: build failed — aborting commit." >&2
+    exit 1
+  }
+  git add TORN-RW-trading-hub.user.js
+fi

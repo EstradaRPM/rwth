@@ -32,7 +32,7 @@ globalThis.document = {};
 // resolves the key off MEM.settings.apiKey).
 localStorage.setItem('rwth_settings', JSON.stringify({ apiKey: GOOD_KEY }));
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { normalizeItems, ItemDict, ItemClassifier, BBEngine } = globalThis.__RwthPure;
 

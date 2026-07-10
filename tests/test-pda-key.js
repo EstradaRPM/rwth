@@ -11,7 +11,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const SCRIPT_PATH = path.join(__dirname, '..', 'TORN-RW-trading-hub.user.js');
+const SCRIPT_PATH = path.join(__dirname, '..', 'TORN-RW-trading-hub.src.user.js');
 const SCRIPT_SOURCE = fs.readFileSync(SCRIPT_PATH, 'utf8');
 
 function makeMockStorage(seed) {
@@ -32,7 +32,7 @@ globalThis.localStorage = makeMockStorage({
 });
 globalThis.document = {};
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { hasRealApiKey, hydrate } = globalThis.__RwthPure;
 

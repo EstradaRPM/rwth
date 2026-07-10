@@ -1,0 +1,15 @@
+{
+  "name": "rwth-trading-hub",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Build + test toolchain for the Torn RW Trading Hub userscript.",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "test": "node --test tests",
+    "setup-hooks": "git config core.hooksPath .githooks"
+  },
+  "devDependencies": {
+    "terser": "^5.31.0"
+  }
+}

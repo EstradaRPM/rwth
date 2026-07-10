@@ -31,7 +31,7 @@ localStorage.setItem('rwth_items_dict', JSON.stringify({
   },
 }));
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { Cache, ListingsFetcher, SupabaseClient } = globalThis.__RwthPure;
 

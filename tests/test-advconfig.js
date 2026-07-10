@@ -23,7 +23,7 @@ globalThis.__RWTH_TEST__ = true;
 globalThis.localStorage = makeMockStorage();
 globalThis.document = {};
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { AdvConfig, THEME_PRESETS, ADV_THEME_TOKENS, ADV_OVERRIDE_FIELDS, ADV_SWATCH_PALETTE } = globalThis.__RwthPure;
 

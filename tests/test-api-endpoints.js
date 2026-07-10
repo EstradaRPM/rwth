@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
-const USERSCRIPT = fs.readFileSync(path.join(ROOT, 'TORN-RW-trading-hub.user.js'), 'utf8');
+const USERSCRIPT = fs.readFileSync(path.join(ROOT, 'TORN-RW-trading-hub.src.user.js'), 'utf8');
 const LIB_MJS = fs.readFileSync(path.join(ROOT, 'auction-db', 'lib.mjs'), 'utf8');
 
 // Load the ESM generator (USED list, spec path, doc builder) from CommonJS.

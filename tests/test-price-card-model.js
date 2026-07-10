@@ -20,7 +20,7 @@ globalThis.__RWTH_TEST__ = true;
 globalThis.localStorage = makeMockStorage();
 globalThis.document = {};
 
-require('../TORN-RW-trading-hub.user.js');
+require('../TORN-RW-trading-hub.src.user.js');
 
 const { PriceCardModel } = globalThis.__RwthPure;
 const DRILL = { bonus: 'auto', quality: 'all', expanded: false, axis: 'bonus' };

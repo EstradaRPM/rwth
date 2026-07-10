@@ -6,9 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Torn (the browser game) **userscript** plus a Node toolchain that feeds it data:
 
-- `TORN-RW-trading-hub.user.js` — a single ~10.5k-line Tampermonkey/Greasemonkey
+- `TORN-RW-trading-hub.src.user.js` — a single ~12.9k-line Tampermonkey/Greasemonkey
   script. A trader's workbench for flipping ranked-war armor & weapons: a ledger,
-  an advertising-copy generator, and a pricing engine. This is the entire shipped product.
+  an advertising-copy generator, and a pricing engine. **This is the file you edit
+  and test.** It is the entire product.
+- `TORN-RW-trading-hub.user.js` — the **minified build artifact** that actually ships
+  (what `@downloadURL` serves, ~52% smaller). Never hand-edit it; it is regenerated
+  from the `.src` file by `node tools/build.mjs` (see "Build step" below).
 - `auction-db/` — Node ES-module scripts that backfill/poll Torn's auction-sale
   feed into a self-owned Supabase table. The userscript reads that table over
   PostgREST for pricing comps.
@@ -16,6 +20,11 @@ A Torn (the browser game) **userscript** plus a Node toolchain that feeds it dat
 ## Commands
 
 ```bash
+# Minify the source into the shipped .user.js (runs automatically on commit via
+# the .githooks/pre-commit hook; run by hand only if you skipped the hook)
+npm run build            # node tools/build.mjs — .src.user.js → .user.js
+npm run setup-hooks      # one-time per clone: git config core.hooksPath .githooks
+
 # Run the full userscript test suite (Node's built-in runner)
 cd tests && node --test
 
@@ -35,9 +44,15 @@ node tools/gen-api-registry.mjs           # rebuild docs/api-endpoints.md from t
 node tools/gen-api-registry.mjs --fetch   # re-download Torn's openapi.json first, then rebuild
 ```
 
-There is no build step, linter, or bundler — the `.user.js` ships as-is. There is
-no root `package.json`; `auction-db/package.json` exists only because `vacuum.mjs`
-needs the `pg` dependency (every other script uses native `fetch`).
+There is no linter or bundler. The **only** build step is minification: `tools/build.mjs`
+(terser, compress + mangle) turns the commented `.src.user.js` into the shipped
+`.user.js`, preserving the `// ==UserScript==` header verbatim. It runs automatically
+in the `.githooks/pre-commit` hook whenever the `.src` file is committed, so the two
+files never drift — you edit `.src`, commit, and the minified file is regenerated and
+staged for you. The root `package.json` exists for this (terser devDep + `build`/`test`
+scripts); `auction-db/package.json` still exists separately only because `vacuum.mjs`
+needs `pg`. Mangling only renames locals — property names (the `__RwthPure` test seam,
+every `data-action` hook) are untouched, so behavior is identical; the suite is the proof.
 
 The suite should be fully green (`node --test` → 0 fail). If you change shipped
 behavior, update the binding tests rather than leaving them red — assertions are
@@ -65,8 +80,11 @@ banner comments that divide the file into sections):
 - **The test seam.** Every pure function meant for testing is re-exported on
   `globalThis.__RwthPure` (the big object near the end of the file, ~line 10456).
   Tests stub browser globals, set `globalThis.__RWTH_TEST__ = true` (which makes the
-  IIFE skip the DOM bootstrap), then `require()` the *shipped* `.user.js` directly —
-  so tests exercise the real shipped code, not a copy. **If you add a pure function
+  IIFE skip the DOM bootstrap), then `require()` the *source* `.src.user.js` directly —
+  so tests exercise the real authored code, not a copy. (The minified `.user.js` is a
+  faithful transform of it — mangling never touches the `__RwthPure` property names —
+  but tests read the readable source so failures point at real lines and the text-scan
+  drift guards can grep for source patterns.) **If you add a pure function
   you want tested, you must add it to `__RwthPure`.** The network transport
   (`GM_xmlhttpRequest`) is swappable via `globalThis.__RWTH_GM` for tests.
 - **Three tabs.** `MEM.ui.activeTab` is `'ledger' | 'advertise' | 'settings'`;
@@ -101,10 +119,13 @@ run `node tools/gen-api-registry.mjs`, and let the test confirm code ↔ registr
 
 ### Versioning
 
-When you change behaviour, bump the version in **both** places and keep them in sync:
-the `// @version` line in the UserScript header and `const SCRIPT_VERSION` just inside
-the IIFE (both currently `0.3.154`). The `@updateURL`/`@downloadURL` point at the
-`estradarpm/torn-scripts` GitHub repo, so users auto-update from there.
+When you change behaviour, bump the version in **both** places in `.src.user.js` and
+keep them in sync: the `// @version` line in the UserScript header and `const
+SCRIPT_VERSION` just inside the IIFE (both currently `0.3.234`). The build copies the
+header verbatim into the shipped `.user.js`. The `@updateURL`/`@downloadURL` point at
+`EstradaRPM/rwth` on GitHub (`main/TORN-RW-trading-hub.user.js`, the minified artifact),
+so users auto-update from there — always commit the rebuilt `.user.js` alongside the
+`.src` change (the pre-commit hook does this automatically).
 
 ## auction-db toolchain
 
