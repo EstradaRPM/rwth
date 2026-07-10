@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.231
+// @version      0.3.232
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.231';
+  const SCRIPT_VERSION = '0.3.232';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -4259,18 +4259,20 @@
   // One chat-blurb item line. Name is abbreviated via ITEM_ABBREV; the parens
   // default to the primary bonus, falling back to quality % when there is none.
   // withPrice=false drops the price tail — used to claw back characters so an
-  // extra listing can fit before any listing is dropped entirely. showBonus=false
-  // (#36) drops the (bonus %) paren entirely — the user turned bonuses off, so it
-  // is never shed mid-fit, it is simply absent. showBonus defaults ON (only an
-  // explicit false suppresses it) so legacy callers keep today's output.
+  // extra listing can fit before any listing is dropped entirely. The bonus NAME
+  // always shows in the parens; showBonus=false only strips the trailing ` value%`
+  // (the toggle is a percentage switch, not a paren switch). showBonus defaults ON
+  // (only an explicit false suppresses the percentage) so legacy callers keep
+  // today's output.
   function chatItemLine(item, withPrice, showBonus) {
     const name = ITEM_ABBREV[item.itemName] || item.itemName || '';
     const b = (item.bonuses || [])[0];
+    // The bonus NAME always shows; the showBonus toggle governs only whether the
+    // percentage is appended. (Quality is a bare number with no name, so it only
+    // reads as meaningful when the percentage is shown — gate that fallback.)
     let paren = '';
-    if (showBonus !== false) {
-      if (b && b.name) paren = b.value != null ? `${b.name} ${b.value}%` : b.name;
-      else if (item.quality != null) paren = `${item.quality}% q`;
-    }
+    if (b && b.name) paren = (showBonus !== false && b.value != null) ? `${b.name} ${b.value}%` : b.name;
+    else if (showBonus !== false && item.quality != null) paren = `${item.quality}% q`;
     const price = withPrice === false ? '' : fmtChatPrice(item.listPrice);
     return `[S] <b>${name}</b>${paren ? ` (${paren})` : ''}`
          + `${price ? ` — <b>${price}</b>` : ''}`;
@@ -5242,7 +5244,7 @@
           </label>
           <label class="rwth-intel-check">
             <input type="checkbox" data-adv-chat-showbonus${c.showBonus !== false ? ' checked' : ''}>
-            Show bonus % (fewer items fit)
+            Show bonus % (name always shows)
           </label>
           <label class="rwth-field">
             <span class="rwth-field-label">Sort — which items lead</span>

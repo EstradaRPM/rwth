@@ -1136,11 +1136,13 @@ test('#35 buildAdvChatGear hides the fields until opened, then prefills them', (
 
 // #36 (S2) — show-price / show-bonus% toggles feed the 125-char fitter. Each is a
 // per-item content ceiling: ON requests that content (longer lines → fewer items
-// fit); OFF drops it. Both ship ON so untouched output reproduces v0.3.229. NOTE:
-// with the cheapest-first price-shed KEPT under the ON state (decision 7), the shed
-// already drives an ON blurb down to the priceless state under pressure, so the
-// price toggle governs the visible tails, not the derived item COUNT. The genuine
-// "more items fit" lever is the bonus toggle, which is never shed mid-fit.
+// fit); OFF claws it back. Both ship ON so untouched output reproduces v0.3.229.
+// NOTE: with the cheapest-first price-shed KEPT under the ON state (decision 7),
+// the shed already drives an ON blurb down to the priceless state under pressure,
+// so the price toggle governs the visible tails, not the derived item COUNT.
+// v0.3.232: the bonus NAME always shows — the show-bonus% toggle now only strips
+// the trailing ` value%`, so it saves fewer chars than before but can still let an
+// extra listing fit; it is never shed mid-fit.
 const chatFitItems = [
   { id: 'a', itemName: 'Kevlar Gloves', bonuses: [{ name: 'Impregnable', value: 15 }], listPrice: 900000000 },
   { id: 'b', itemName: 'Riot Shield',   bonuses: [{ name: 'Impenetrable', value: 12 }], listPrice: 800000000 },
@@ -1181,16 +1183,19 @@ test('#36 toChat: show-price OFF drops the — price tails and never shows fewer
   assert.ok(chatItemCount(off) >= chatItemCount(on));
 });
 
-test('#36 toChat: show-bonus% OFF drops the (…) parens AND more items fit under 125', () => {
+test('#36 toChat: show-bonus% OFF keeps the name paren but drops the trailing percentage', () => {
   const { AdvertiseGenerator } = globalThis.__RwthPure;
   const on = AdvertiseGenerator.toChat(chatFitItems, chatFitSettings);
   const off = AdvertiseGenerator.toChat(chatFitItems, { ...chatFitSettings, chatShowBonus: false });
-  // Bonus is NOT shed mid-fit — OFF removes every (bonus %) paren outright.
+  // ON: name + percentage. OFF: the bonus NAME still shows — only the ` value%` is gone.
   assert.match(on, /\(Impregnable 15%\)/);
-  assert.doesNotMatch(off, /\([A-Za-z]/);        // no lettered parens (bonus/quality) on item lines
-  // Shorter lines → the fitter shows strictly more listings under the 125 cap.
-  assert.ok(chatItemCount(off) > chatItemCount(on),
-    `expected bonus-off to fit more items (on=${chatItemCount(on)}, off=${chatItemCount(off)})`);
+  assert.match(off, /\(Impregnable\)/);          // name survives the toggle
+  assert.doesNotMatch(off, /\(Impregnable \d/);  // but the percentage does not
+  assert.doesNotMatch(off, /\d%\)/);             // no bonus/quality percentage in any paren
+  // Shorter lines (percentage clawed back) → the fitter shows at least as many
+  // listings under the 125 cap, never fewer.
+  assert.ok(chatItemCount(off) >= chatItemCount(on),
+    `expected bonus-off to fit at least as many items (on=${chatItemCount(on)}, off=${chatItemCount(off)})`);
   // Char-budget honesty: every line still fits Torn's 125 rendered-char cap.
   for (const line of off.split('\n')) {
     assert.ok(line.replace(/<[^>]+>/g, '').length <= 125);
