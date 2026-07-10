@@ -1072,6 +1072,215 @@ test('AdvertiseGenerator.toChat omits links when settings are blank', () => {
   assert.doesNotMatch(out, /Bazaar|Forum/);
 });
 
+// #35 (S1) — the trade-chat blurb decoration is now user-editable emoji inserts
+// resolved through AdvConfig.chat. Upgrade safety: with the new settings untouched,
+// the header + Floor-Prices lines must reproduce v0.3.228's inline literals exactly.
+test('#35 toChat header decoration is byte-identical to v0.3.228 by default', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const out = AdvertiseGenerator.toChat([listedEnfield], { shopName: 'Test Shop' });
+  // The two header lines lead the blurb, unchanged from the shipped literals.
+  assert.ok(out.startsWith('🔹🔷 <u>Test Shop</u> 🔷🔹\n🟢 <u>Floor Prices</u> 🟢\n'),
+    `header not byte-identical:\n${out}`);
+});
+
+test('#35 toChat: a custom emoji changes exactly that decoration', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  // Only headerLeft is customised — right flourish + Floor-Prices marker stay default.
+  const left = AdvertiseGenerator.toChat([listedEnfield], { shopName: 'Test Shop', chatHeaderLeft: '🔥' });
+  assert.ok(left.startsWith('🔥 <u>Test Shop</u> 🔷🔹\n🟢 <u>Floor Prices</u> 🟢\n'),
+    `custom headerLeft not applied:\n${left}`);
+  // Only the Floor-Prices marker is customised — the header flourish stays default.
+  const floor = AdvertiseGenerator.toChat([listedEnfield], { shopName: 'Test Shop', chatFloorMarker: '💰' });
+  assert.ok(floor.startsWith('🔹🔷 <u>Test Shop</u> 🔷🔹\n💰 <u>Floor Prices</u> 💰\n'),
+    `custom floorMarker not applied:\n${floor}`);
+});
+
+test('#35 toChat: a cleared field removes exactly that decoration', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  // Explicit '' drops the decoration with no stray leading/trailing space.
+  const out = AdvertiseGenerator.toChat([listedEnfield], {
+    shopName: 'Test Shop', chatHeaderLeft: '', chatHeaderRight: '', chatFloorMarker: '' });
+  assert.ok(out.startsWith('<u>Test Shop</u>\n<u>Floor Prices</u>\n'),
+    `cleared decoration not removed:\n${out}`);
+});
+
+test('#35 AdvConfig.resolve.chat: undefined -> default, "" -> removed', () => {
+  const { AdvConfig } = globalThis.__RwthPure;
+  const def = AdvConfig.resolve({}).chat;
+  assert.deepStrictEqual(def, {
+    headerLeft: '🔹🔷', headerRight: '🔷🔹', floorMarker: '🟢',
+    showPrice: true, showBonus: true, // #36 — both fit toggles ship ON
+    sort: 'price', // #37 — sort defaults to highest-price
+  });
+  const cleared = AdvConfig.resolve({ chatHeaderLeft: '', chatFloorMarker: '' }).chat;
+  assert.strictEqual(cleared.headerLeft, '');
+  assert.strictEqual(cleared.headerRight, '🔷🔹'); // untouched -> default
+  assert.strictEqual(cleared.floorMarker, '');
+});
+
+test('#35 buildAdvChatGear hides the fields until opened, then prefills them', () => {
+  const { buildAdvChatGear } = globalThis.__RwthPure;
+  const chat = { headerLeft: '🔹🔷', headerRight: '🔷🔹', floorMarker: '🟢' };
+  const closed = buildAdvChatGear(chat, false);
+  assert.match(closed, /data-action="toggle-adv-chat-gear"/);
+  assert.doesNotMatch(closed, /data-adv-chat=/);
+  const open = buildAdvChatGear(chat, true);
+  assert.match(open, /data-adv-chat="headerLeft"[^>]*value="🔹🔷"/);
+  assert.match(open, /data-adv-chat="headerRight"[^>]*value="🔷🔹"/);
+  assert.match(open, /data-adv-chat="floorMarker"[^>]*value="🟢"/);
+  assert.match(open, /is-open/);
+  // Default (unmodified) chat lights no active dot; a customised field does.
+  assert.doesNotMatch(buildAdvChatGear(chat, false), /rwth-gear-dot/);
+  assert.match(buildAdvChatGear({ ...chat, headerLeft: '🔥' }, false), /rwth-gear-dot/);
+});
+
+// #36 (S2) — show-price / show-bonus% toggles feed the 125-char fitter. Each is a
+// per-item content ceiling: ON requests that content (longer lines → fewer items
+// fit); OFF drops it. Both ship ON so untouched output reproduces v0.3.229. NOTE:
+// with the cheapest-first price-shed KEPT under the ON state (decision 7), the shed
+// already drives an ON blurb down to the priceless state under pressure, so the
+// price toggle governs the visible tails, not the derived item COUNT. The genuine
+// "more items fit" lever is the bonus toggle, which is never shed mid-fit.
+const chatFitItems = [
+  { id: 'a', itemName: 'Kevlar Gloves', bonuses: [{ name: 'Impregnable', value: 15 }], listPrice: 900000000 },
+  { id: 'b', itemName: 'Riot Shield',   bonuses: [{ name: 'Impenetrable', value: 12 }], listPrice: 800000000 },
+  { id: 'c', itemName: 'Chain Vest',    bonuses: [{ name: 'Impervious', value: 10 }],  listPrice: 700000000 },
+];
+const chatFitSettings = { shopName: 'My Shop', playerId: '12345', forumThreadUrl: 'https://x' };
+const chatItemCount = (t) => (t.match(/\[S\]/g) || []).length;
+
+test('#36 AdvConfig.resolve.chat: showPrice/showBonus default ON, explicit false → OFF', () => {
+  const { AdvConfig } = globalThis.__RwthPure;
+  const def = AdvConfig.resolve({}).chat;
+  assert.strictEqual(def.showPrice, true);
+  assert.strictEqual(def.showBonus, true);
+  const off = AdvConfig.resolve({ chatShowPrice: false, chatShowBonus: false }).chat;
+  assert.strictEqual(off.showPrice, false);
+  assert.strictEqual(off.showBonus, false);
+  // Only an explicit false flips it — any other value reads as ON.
+  assert.strictEqual(AdvConfig.resolve({ chatShowPrice: true }).chat.showPrice, true);
+});
+
+test('#36 toChat: both toggles ON with untouched emoji reproduces v0.3.229 byte-for-byte', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const out = AdvertiseGenerator.toChat([listedEnfield, listedRiot], { shopName: 'Test Shop' });
+  assert.strictEqual(out,
+    '🔹🔷 <u>Test Shop</u> 🔷🔹\n🟢 <u>Floor Prices</u> 🟢\n'
+    + '[S] <b>Enfield</b> (Deadeye 29%) — <b>$118m</b>\n'
+    + '[S] <b>Riot Body</b> (6.5% q) — <b>$78m</b>');
+});
+
+test('#36 toChat: show-price OFF drops the — price tails and never shows fewer items', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const on = AdvertiseGenerator.toChat(chatFitItems, chatFitSettings);
+  const off = AdvertiseGenerator.toChat(chatFitItems, { ...chatFitSettings, chatShowPrice: false });
+  assert.match(on, /—/);                         // ON: at least one price tail
+  assert.doesNotMatch(off, /—/);                 // OFF: no price tails at all
+  assert.doesNotMatch(off, /\$\d/);              // OFF: no formatted price anywhere
+  // The kept cheapest-first shed means OFF is never forced to show fewer listings.
+  assert.ok(chatItemCount(off) >= chatItemCount(on));
+});
+
+test('#36 toChat: show-bonus% OFF drops the (…) parens AND more items fit under 125', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const on = AdvertiseGenerator.toChat(chatFitItems, chatFitSettings);
+  const off = AdvertiseGenerator.toChat(chatFitItems, { ...chatFitSettings, chatShowBonus: false });
+  // Bonus is NOT shed mid-fit — OFF removes every (bonus %) paren outright.
+  assert.match(on, /\(Impregnable 15%\)/);
+  assert.doesNotMatch(off, /\([A-Za-z]/);        // no lettered parens (bonus/quality) on item lines
+  // Shorter lines → the fitter shows strictly more listings under the 125 cap.
+  assert.ok(chatItemCount(off) > chatItemCount(on),
+    `expected bonus-off to fit more items (on=${chatItemCount(on)}, off=${chatItemCount(off)})`);
+  // Char-budget honesty: every line still fits Torn's 125 rendered-char cap.
+  for (const line of off.split('\n')) {
+    assert.ok(line.replace(/<[^>]+>/g, '').length <= 125);
+  }
+});
+
+test('#36 toChat: item count stays derived, capped at CHAT_LIMIT, +N more reflects drops', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  // Four short items, both toggles OFF → all lines minimal, so the cap (3) binds
+  // and the 4th collapses into "+1 more listed" — count is derived, not user-set.
+  const four = [
+    { id: 'a', itemName: 'A1', bonuses: [], listPrice: 900000000 },
+    { id: 'b', itemName: 'B2', bonuses: [], listPrice: 800000000 },
+    { id: 'c', itemName: 'C3', bonuses: [], listPrice: 700000000 },
+    { id: 'd', itemName: 'D4', bonuses: [], listPrice: 600000000 },
+  ];
+  const out = AdvertiseGenerator.toChat(four, { shopName: 'S', chatShowPrice: false, chatShowBonus: false });
+  assert.strictEqual(chatItemCount(out), 3);     // never more than CHAT_LIMIT
+  assert.match(out, /\+1 more listed/);          // the drop is reported
+  // With bonuses + prices ON the same four items fit fewer lines, and "+N more"
+  // grows to match — the count derives from the active toggles, not a fixed N.
+  const dense = AdvertiseGenerator.toChat(chatFitItems, chatFitSettings);
+  assert.match(dense, /\+2 more listed/);
+});
+
+test('#36 buildAdvChatGear renders both toggles (default checked) and lights the dot when one is OFF', () => {
+  const { buildAdvChatGear } = globalThis.__RwthPure;
+  const on = buildAdvChatGear({ headerLeft: '🔹🔷', headerRight: '🔷🔹', floorMarker: '🟢', showPrice: true, showBonus: true }, true);
+  assert.match(on, /data-adv-chat-showprice[^>]*checked/);
+  assert.match(on, /data-adv-chat-showbonus[^>]*checked/);
+  // A toggle turned OFF renders unchecked and lights the active dot even when the
+  // emoji fields are all at their shipped defaults.
+  const off = buildAdvChatGear({ headerLeft: '🔹🔷', headerRight: '🔷🔹', floorMarker: '🟢', showPrice: false, showBonus: true }, false);
+  assert.doesNotMatch(off, /data-adv-chat-showprice[^>]*checked/);
+  assert.match(off, /rwth-gear-dot/);
+  const offBonus = buildAdvChatGear({ headerLeft: '🔹🔷', headerRight: '🔷🔹', floorMarker: '🟢', showPrice: true, showBonus: false }, false);
+  assert.match(offBonus, /rwth-gear-dot/);
+});
+
+// #37 (S3) — sort choice governs which listings lead the blurb: highest price
+// (default, reproduces today's order) or oldest-first (buyTimestamp ascending, for
+// dumping long-held stock). Explicitly two options only — no bonus-% or blended rank.
+// Distinct listPrice ranking vs buyTimestamp ranking so the two orders differ.
+const chatSortItems = [
+  { id: 'x', itemName: 'X1', bonuses: [], listPrice: 300000000, buyTimestamp: 1000 }, // oldest, cheapest
+  { id: 'y', itemName: 'Y2', bonuses: [], listPrice: 900000000, buyTimestamp: 3000 }, // priciest, newest
+  { id: 'z', itemName: 'Z3', bonuses: [], listPrice: 600000000, buyTimestamp: 2000 },
+];
+
+test('#37 AdvConfig.resolve.chat.sort: default price, chatSort:age → age, other → price', () => {
+  const { AdvConfig } = globalThis.__RwthPure;
+  assert.strictEqual(AdvConfig.resolve({}).chat.sort, 'price');
+  assert.strictEqual(AdvConfig.resolve({ chatSort: 'age' }).chat.sort, 'age');
+  // Any non-'age' value falls back to the highest-price default.
+  assert.strictEqual(AdvConfig.resolve({ chatSort: 'bonus' }).chat.sort, 'price');
+  assert.strictEqual(AdvConfig.resolve({ chatSort: 'price' }).chat.sort, 'price');
+});
+
+test('#37 toChat: Highest price (default) keeps listPrice-descending order — unchanged from today', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const out = AdvertiseGenerator.toChat(chatSortItems, { shopName: 'S', chatShowPrice: false });
+  const order = (out.match(/<b>([XYZ]\d)<\/b>/g) || []).map(m => m.replace(/<\/?b>/g, ''));
+  assert.deepStrictEqual(order, ['Y2', 'Z3', 'X1']); // 900m > 600m > 300m
+});
+
+test('#37 toChat: Oldest first leads with the earliest-buyTimestamp item', () => {
+  const { AdvertiseGenerator } = globalThis.__RwthPure;
+  const out = AdvertiseGenerator.toChat(chatSortItems, { shopName: 'S', chatShowPrice: false, chatSort: 'age' });
+  const order = (out.match(/<b>([XYZ]\d)<\/b>/g) || []).map(m => m.replace(/<\/?b>/g, ''));
+  assert.deepStrictEqual(order, ['X1', 'Z3', 'Y2']); // buyTimestamp 1000 < 2000 < 3000
+  assert.match(out, /<b>X1<\/b>/); // oldest-held leads
+});
+
+test('#37 buildAdvChatGear renders the sort select with both options, default Highest price', () => {
+  const { buildAdvChatGear } = globalThis.__RwthPure;
+  const base = { headerLeft: '🔹🔷', headerRight: '🔷🔹', floorMarker: '🟢', showPrice: true, showBonus: true };
+  const open = buildAdvChatGear({ ...base, sort: 'price' }, true);
+  assert.match(open, /data-adv-chat-sort/);
+  assert.match(open, /<option value="price"[^>]*selected>Highest price<\/option>/);
+  assert.match(open, /<option value="age"[^>]*>Oldest first<\/option>/);
+  assert.doesNotMatch(open, /value="age"[^>]*selected/);
+  // Oldest-first selected marks the age option and lights the active dot.
+  const age = buildAdvChatGear({ ...base, sort: 'age' }, false);
+  assert.match(age, /rwth-gear-dot/);
+  const ageOpen = buildAdvChatGear({ ...base, sort: 'age' }, true);
+  assert.match(ageOpen, /<option value="age"[^>]*selected>Oldest first<\/option>/);
+  // Default price sort with untouched emoji/toggles lights no dot.
+  assert.doesNotMatch(buildAdvChatGear({ ...base, sort: 'price' }, false), /rwth-gear-dot/);
+});
+
 test('buildAdvertiseTab default-checks all listed rows with price input + IMG button', () => {
   const { buildAdvertiseTab } = globalThis.__RwthPure;
   const html = buildAdvertiseTab({

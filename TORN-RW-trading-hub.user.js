@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.228
+// @version      0.3.231
 // @description  Trader's workbench for ranked-war armor & weapon flipping — ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.228';
+  const SCRIPT_VERSION = '0.3.231';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -117,6 +117,19 @@
     subBanner: '✎ Click the ⚙ Forum gear to set your shop subtitle — or clear it to hide this line.',
     intro: '✎ Click the ⚙ Forum gear (in Copy to Torn) to write your own shop intro here — or clear it to hide this line.',
     alsoRotating: '✎ Click the ⚙ Forum gear to say what else you keep in stock — or clear it to hide this line.',
+  };
+
+  // #35 — trade-chat blurb decoration defaults. Each is a user-supplied emoji
+  // insert edited behind the chat gear; the shipped defaults reproduce v0.3.228's
+  // inline literals byte-for-byte. Resolution matches ADV_COPY_DEFAULTS: an ABSENT
+  // setting (undefined) yields the shipped default, an explicit blank ('') drops
+  // that decoration. headerLeft/Right wrap the shop name; floorMarker wraps the
+  // "Floor Prices" line on both sides. [S] is NOT here — it is a fixed Torn
+  // selling indicator, not an emoji slot.
+  const ADV_CHAT_DEFAULTS = {
+    headerLeft: '🔹🔷',
+    headerRight: '🔷🔹',
+    floorMarker: '🟢',
   };
 
   // #317 — the post palette is themeable. Every colour the HTML builders draw
@@ -456,7 +469,28 @@
       // When on, toBazaarHtml renders the shared selected set as the compact
       // signature-card catalogue under an "Also available" divider.
       const bazaarShowItems = s.bazaarShowItems === true;
-      return { identity, theme, copy, sections, locations, availability, images, markup, mugMarkup, bazaarShowItems };
+      // #35 — trade-chat blurb decoration. Each field resolves like the forum copy
+      // blocks: undefined -> shipped default (byte-identical to v0.3.228), explicit
+      // '' -> '' so toChat drops that decoration. Stored under chat-prefixed keys
+      // (chatHeaderLeft/Right/FloorMarker) via the data-adv-chat controls.
+      const chat = {};
+      for (const key of Object.keys(ADV_CHAT_DEFAULTS)) {
+        const sk = 'chat' + key.charAt(0).toUpperCase() + key.slice(1);
+        const raw = s[sk];
+        chat[key] = raw === undefined ? ADV_CHAT_DEFAULTS[key] : String(raw).trim();
+      }
+      // #36 — show-price / show-bonus% toggles feed the fitter. Both default ON
+      // (absent key reads as ON) so untouched output reproduces v0.3.229: prices
+      // show when they fit, bonuses always show. OFF drops that content per item,
+      // and because each line gets shorter the 125-char fitter shows more listings.
+      chat.showPrice = s.chatShowPrice !== false;
+      chat.showBonus = s.chatShowBonus !== false;
+      // #37 — which items rise to the top of the blurb. 'price' (default) reproduces
+      // v0.3.230's listPrice-descending order; 'age' sorts by buyTimestamp ascending
+      // (longest-held first) for dumping stock. Only these two; explicitly not
+      // bonus-% ranking (raw % isn't comparable across bonus types).
+      chat.sort = s.chatSort === 'age' ? 'age' : 'price';
+      return { identity, theme, copy, sections, locations, availability, images, markup, mugMarkup, bazaarShowItems, chat };
     },
   };
 
@@ -578,6 +612,10 @@
       // click-toggle caret pattern as the other Advertise gears; holds the two
       // item-market markup toggles so they no longer sit above the item list.
       advItemsGearOpen: false,
+      // #35 — whether the trade-chat blurb's gear popover is open. Same
+      // click-toggle caret pattern as the other Advertise gears; holds the
+      // user-supplied emoji-insert fields for the blurb decoration.
+      advChatGearOpen: false,
     },
     ledger: {
       items: [],
@@ -4221,13 +4259,18 @@
   // One chat-blurb item line. Name is abbreviated via ITEM_ABBREV; the parens
   // default to the primary bonus, falling back to quality % when there is none.
   // withPrice=false drops the price tail — used to claw back characters so an
-  // extra listing can fit before any listing is dropped entirely.
-  function chatItemLine(item, withPrice) {
+  // extra listing can fit before any listing is dropped entirely. showBonus=false
+  // (#36) drops the (bonus %) paren entirely — the user turned bonuses off, so it
+  // is never shed mid-fit, it is simply absent. showBonus defaults ON (only an
+  // explicit false suppresses it) so legacy callers keep today's output.
+  function chatItemLine(item, withPrice, showBonus) {
     const name = ITEM_ABBREV[item.itemName] || item.itemName || '';
     const b = (item.bonuses || [])[0];
     let paren = '';
-    if (b && b.name) paren = b.value != null ? `${b.name} ${b.value}%` : b.name;
-    else if (item.quality != null) paren = `${item.quality}% q`;
+    if (showBonus !== false) {
+      if (b && b.name) paren = b.value != null ? `${b.name} ${b.value}%` : b.name;
+      else if (item.quality != null) paren = `${item.quality}% q`;
+    }
     const price = withPrice === false ? '' : fmtChatPrice(item.listPrice);
     return `[S] <b>${name}</b>${paren ? ` (${paren})` : ''}`
          + `${price ? ` — <b>${price}</b>` : ''}`;
@@ -4760,9 +4803,14 @@
       const resolved = AdvConfig.resolve(s);
       const { shopName } = resolved.identity;
       const markup = resolved.markup;
+      // #35 — decoration comes from resolved.chat (user emoji inserts). Defaults
+      // reproduce the old inline literals exactly; an explicitly-blank field drops
+      // that decoration (no stray leading/trailing space). [S] stays hardcoded in
+      // chatItemLine — it is a fixed Torn selling indicator, not an emoji slot.
+      const { headerLeft, headerRight, floorMarker, showPrice, showBonus, sort } = resolved.chat;
       const header = [
-        `🔹🔷 <u>${shopName}</u> 🔷🔹`,
-        `🟢 <u>Floor Prices</u> 🟢`,
+        `${headerLeft ? `${headerLeft} ` : ''}<u>${shopName}</u>${headerRight ? ` ${headerRight}` : ''}`,
+        `${floorMarker ? `${floorMarker} ` : ''}<u>Floor Prices</u>${floorMarker ? ` ${floorMarker}` : ''}`,
       ];
       // Brackets sit OUTSIDE the anchor so they render as plain text, not as
       // part of the hotlink.
@@ -4784,18 +4832,24 @@
       // Torn's chat input caps a post at 125 rendered characters (HTML markup
       // does not count). With 3 items + a "+N more" line the tail — the
       // Bazaar/Forum links — got truncated. To fit: first shed item prices
-      // (from the cheapest listing up), and only drop a whole listing once
-      // every price is already gone. Links are reserved budget, never dropped.
+      // (from the cheapest listing up, only while show-price is ON), and only
+      // drop a whole listing once every price is already gone. Links are reserved
+      // budget, never dropped; bonuses are governed by the toggle (#36), not shed.
       const CHAR_LIMIT = 125;
-      const sorted = (items || []).slice().sort((a, b) =>
-        (Number(b.listPrice) || 0) - (Number(a.listPrice) || 0));
+      // #37 — sort choice governs which listings lead. 'age' sorts by buyTimestamp
+      // ascending (oldest-held first, for dumping stock); the default 'price' keeps
+      // v0.3.230's listPrice-descending order byte-for-byte.
+      const cmp = sort === 'age'
+        ? (a, b) => (Number(a.buyTimestamp) || 0) - (Number(b.buyTimestamp) || 0)
+        : (a, b) => (Number(b.listPrice) || 0) - (Number(a.listPrice) || 0);
+      const sorted = (items || []).slice().sort(cmp);
       const picks = sorted.slice(0, CHAT_LIMIT);
       const visibleLen = (arr) => arr.join('\n').replace(/<[^>]+>/g, '').length;
       // shown = listings kept; dropped = how many of them show without a price
       // (the trailing/cheapest ones).
       const assemble = (shown, dropped) => {
         const itemLines = picks.slice(0, shown)
-          .map((it, i) => chatItemLine(it, i < shown - dropped));
+          .map((it, i) => chatItemLine(it, showPrice && i < shown - dropped, showBonus));
         const remaining = sorted.length - shown;
         const moreLine = remaining > 0 ? [`<i>+${remaining} more listed</i>`] : [];
         return [...header, ...itemLines, ...moreLine, ...linkLines];
@@ -4911,14 +4965,20 @@
 
   // A windowed copy box. Editable boxes are a textarea (the chat blurb is tuned
   // in place before copy); static boxes are a div. Copy reads the live value.
-  function buildOutputBox(label, id, value, editable, rows) {
+  function buildOutputBox(label, id, value, editable, rows, gear) {
     const body = editable
       ? `<textarea class="rwth-field-input rwth-output-box" id="${id}" rows="${rows || 8}"
                    spellcheck="false">${escapeAttr(value)}</textarea>`
       : `<div class="rwth-output-box" id="${id}">${escapeAttr(value)}</div>`;
+    // #35 — an optional gear sits at the head's left, grouped with the label, so
+    // the head mirrors the tx/surface heads (gear left, Copy right). Without a gear
+    // the head keeps its original label-left / Copy-right shape.
+    const lead = gear
+      ? `<div class="rwth-output-head-lead">${gear}<span class="rwth-field-label">${label}</span></div>`
+      : `<span class="rwth-field-label">${label}</span>`;
     return `<div class="rwth-output">
       <div class="rwth-output-head">
-        <span class="rwth-field-label">${label}</span>
+        ${lead}
         <button class="rwth-btn-sm" type="button" data-action="copy-output"
                 data-copy-target="${id}">Copy</button>
       </div>
@@ -5136,6 +5196,68 @@
                 data-action="toggle-adv-items-gear" aria-expanded="${open ? 'true' : 'false'}"
                 aria-label="Pricing options" title="Pricing options">⚙ <span class="rwth-gear-label">Pricing</span>${
           markup ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
+        ${pop}
+      </div>`;
+  }
+
+  // #35 — the trade-chat blurb's gear. Same click-toggle caret pattern as the
+  // other three Advertise gears (never :hover). Carries the three user-supplied
+  // emoji-insert fields — header flourish left/right and the Floor-Prices marker —
+  // committed on `change` via data-adv-chat, so each trader stamps their own
+  // flavour on the blurb instead of mirroring the shipped default. `chat` is the
+  // resolved AdvConfig.chat block, so the inputs prefill with the live values
+  // (shipped emoji defaults on a fresh install). Clearing a field drops that
+  // decoration. The dot lights when any field differs from the shipped default.
+  // Pure — exposed via __RwthPure for the Node test seam.
+  function buildAdvChatGear(chat, open) {
+    const c = chat || {};
+    const val = (k) => escapeAttr(c[k] == null ? '' : String(c[k]));
+    // The dot lights when any emoji field differs from the shipped default OR
+    // (#36) either fit toggle is turned OFF (both ship ON).
+    const customized = Object.keys(ADV_CHAT_DEFAULTS).some(
+      k => (c[k] == null ? '' : String(c[k])) !== ADV_CHAT_DEFAULTS[k])
+      || c.showPrice === false || c.showBonus === false
+      || c.sort === 'age';
+    const pop = open
+      ? `<div class="rwth-adv-gear-pop">
+          <span class="rwth-field-help">Your own emoji flavour for the trade-chat blurb — type or paste from your keyboard. Clear a field to drop that decoration.</span>
+          <label class="rwth-field">
+            <span class="rwth-field-label">Header flourish (left)</span>
+            <input class="rwth-field-input" type="text" data-adv-chat="headerLeft"
+                   value="${val('headerLeft')}" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="rwth-field">
+            <span class="rwth-field-label">Header flourish (right)</span>
+            <input class="rwth-field-input" type="text" data-adv-chat="headerRight"
+                   value="${val('headerRight')}" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="rwth-field">
+            <span class="rwth-field-label">Floor-Prices marker</span>
+            <input class="rwth-field-input" type="text" data-adv-chat="floorMarker"
+                   value="${val('floorMarker')}" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="rwth-intel-check">
+            <input type="checkbox" data-adv-chat-showprice${c.showPrice !== false ? ' checked' : ''}>
+            Show price (fewer items fit)
+          </label>
+          <label class="rwth-intel-check">
+            <input type="checkbox" data-adv-chat-showbonus${c.showBonus !== false ? ' checked' : ''}>
+            Show bonus % (fewer items fit)
+          </label>
+          <label class="rwth-field">
+            <span class="rwth-field-label">Sort — which items lead</span>
+            <select class="rwth-field-input" data-adv-chat-sort>
+              <option value="price"${c.sort === 'age' ? '' : ' selected'}>Highest price</option>
+              <option value="age"${c.sort === 'age' ? ' selected' : ''}>Oldest first</option>
+            </select>
+          </label>
+        </div>`
+      : '';
+    return `<div class="rwth-adv-gear">
+        <button class="rwth-gear-btn${open ? ' is-open' : ''}${customized ? ' has-img' : ''}" type="button"
+                data-action="toggle-adv-chat-gear" aria-expanded="${open ? 'true' : 'false'}"
+                aria-label="Chat blurb options" title="Chat blurb options">⚙ <span class="rwth-gear-label">Emoji</span>${
+          customized ? ' <span class="rwth-gear-dot">●</span>' : ''}</button>
         ${pop}
       </div>`;
   }
@@ -5367,7 +5489,8 @@
       // blurb stays an editable textarea for last-second wording tweaks before copy.
       const textStrip = `
         ${buildOutputBox('Trade-chat blurb', 'rwth-out-chat',
-                         AdvertiseGenerator.toChat(selectedItems, settings), true, 3)}`;
+                         AdvertiseGenerator.toChat(selectedItems, settings), true, 3,
+                         buildAdvChatGear(resolved.chat, !!ui.advChatGearOpen))}`;
 
       // #325 — surface switcher. A segmented Forum/Bazaar/Signature control selects
       // which HTML surface is shown; the body is the rendered preview by default,
@@ -5557,6 +5680,7 @@
         case 'toggle-adv-gear': toggleAdvGear(); break;
         case 'toggle-adv-tx-gear': setState({ ui: { ...MEM.ui, advTxGearOpen: !MEM.ui.advTxGearOpen } }); break;
         case 'toggle-adv-items-gear': setState({ ui: { ...MEM.ui, advItemsGearOpen: !MEM.ui.advItemsGearOpen } }); break;
+        case 'toggle-adv-chat-gear': setState({ ui: { ...MEM.ui, advChatGearOpen: !MEM.ui.advChatGearOpen } }); break;
         case 'adv-select-all':  setState({ advertise: { ...MEM.advertise, selectedIds: null } }); break;
         case 'adv-select-none': setState({ advertise: { ...MEM.advertise, selectedIds: [] } }); break;
         case 'toggle-img':    setState({ advertise: { ...MEM.advertise,
@@ -5687,6 +5811,47 @@
       MEM.settings = { ...MEM.settings, [key]: e.target.value };
       Store.set('rwth_settings', MEM.settings);
       if (e.type === 'change') render();
+      return;
+    }
+    // #35 — trade-chat blurb emoji inserts. data-adv-chat carries the field name
+    // (headerLeft|headerRight|floorMarker); it persists under a chat-prefixed key
+    // (chatHeaderLeft/…) so it never collides with other settings. Stored verbatim
+    // (an explicit blank persists as '' so the resolver drops that decoration) and
+    // re-renders on `change` (blur) so the blurb reflects the new emoji.
+    if (e.target.matches && e.target.matches('[data-adv-chat]')) {
+      const field = e.target.dataset.advChat;
+      const key = 'chat' + field.charAt(0).toUpperCase() + field.slice(1);
+      MEM.settings = { ...MEM.settings, [key]: e.target.value };
+      Store.set('rwth_settings', MEM.settings);
+      if (e.type === 'change') render();
+      return;
+    }
+    // #36 — trade-chat show-price / show-bonus% toggles. These are CHECKBOXES, not
+    // text fields, so (unlike the data-adv-chat branch above) they read
+    // e.target.checked and store a boolean under chatShowPrice/chatShowBonus. Both
+    // default ON (absent key reads as ON in the resolver), so this only ever
+    // persists an explicit off/on. Re-render immediately so the 125-char fitter
+    // recomputes how many listings fit under the new per-line budget.
+    if (e.target.matches && e.target.matches('[data-adv-chat-showprice]')) {
+      MEM.settings = { ...MEM.settings, chatShowPrice: e.target.checked };
+      Store.set('rwth_settings', MEM.settings);
+      render();
+      return;
+    }
+    if (e.target.matches && e.target.matches('[data-adv-chat-showbonus]')) {
+      MEM.settings = { ...MEM.settings, chatShowBonus: e.target.checked };
+      Store.set('rwth_settings', MEM.settings);
+      render();
+      return;
+    }
+    // #37 — trade-chat sort choice. A SELECT storing 'price' | 'age' under chatSort.
+    // Default 'price' (absent/other value reads as highest-price in the resolver),
+    // so this only persists an explicit choice. Re-render so the blurb reorders and
+    // the 125-char fitter re-runs against the new lead ordering.
+    if (e.target.matches && e.target.matches('[data-adv-chat-sort]')) {
+      MEM.settings = { ...MEM.settings, chatSort: e.target.value === 'age' ? 'age' : 'price' };
+      Store.set('rwth_settings', MEM.settings);
+      render();
       return;
     }
     // #319 — Recent Transactions show/hide. Stored as showTransactions; the
@@ -8598,6 +8763,9 @@
       .rwth-output-head {
         display: flex; align-items: center; justify-content: space-between;
       }
+      /* #35 — chat blurb head: gear + label grouped at the left (mirrors the
+         tx/surface heads), Copy stays pushed to the right by space-between. */
+      .rwth-output-head-lead { display: flex; align-items: center; gap: var(--rwth-gap-sm); }
       .rwth-output-box {
         background: #111; color: var(--rwth-text); border: 1px solid var(--rwth-border-strong);
         border-radius: var(--rwth-radius-ctl); padding: var(--rwth-gap-sm);
@@ -12186,6 +12354,7 @@
     buildAdvSurfaceGear,
     buildAdvTxGear,
     buildAdvItemsGear,
+    buildAdvChatGear,
     buildSettingsTab,
     buildScanChecklist,
     buildSellBox,
