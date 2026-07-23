@@ -1226,3 +1226,115 @@ test('two identical sales in one scan dedupe: the second is flagged duplicate', 
   assert.strictEqual(preview.sales[0].duplicate, false);
   assert.strictEqual(preview.sales[1].duplicate, true);
 });
+
+// ─── v0.3.238 — reinforce the auction channel across all rarity colours ──────
+
+test('an orange auction buy survives reconcile even when itemdetails resolves no colour', () => {
+  // Bug: "first auction buy of an orange rare weapon — scan did not detect it as a
+  // purchase." Torn's rarity enum is only yellow|orange|red|null, so a failed or
+  // rate-limited per-uid itemdetails call comes back null — indistinguishable from
+  // a standard item by rarity alone. An auction win is a deliberate RW purchase, so
+  // it must be kept on a null rarity, not silently dropped.
+  const itemNames = { 614: 'Diamond Bladed Knife' };
+  const buy = P.classifyLogEvent({
+    id: 'orange-auction', timestamp: 1783000000,
+    data: { item: { id: 614, uid: 900001, name: 'Diamond Bladed Knife' }, final_price: 42_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, 'orange-auction', itemNames, cats);
+  const preview = P.buildScanPreview([buy], { cats, itemNames, items: [], transactions: [] });
+  assert.strictEqual(preview.buys.length, 1);
+  assert.strictEqual(preview.buys[0].buySource, 'auction');
+
+  // itemdetails never resolved a colour → rarity stays null.
+  const enriched = preview.buys.map(h => ({ ...h, rarity: null }));
+  const { keptBuys } = P.reconcileScanRarity(preview, enriched);
+  assert.strictEqual(keptBuys.length, 1, 'the auction buy is kept despite a null rarity');
+  assert.strictEqual(keptBuys[0].itemName, 'Diamond Bladed Knife');
+});
+
+test('reconcile keeps auction buys of every RW colour (orange and red, not just yellow)', () => {
+  const itemNames = { 614: 'Diamond Bladed Knife' };
+  const mkBuy = (id, uid) => P.classifyLogEvent({
+    id, timestamp: 1783000000,
+    data: { item: { id: 614, uid, name: 'Diamond Bladed Knife' }, final_price: 42_000_000 },
+  }, P.SCAN_LOG_TYPES.auctionBuy, id, itemNames, cats);
+  const preview = P.buildScanPreview([mkBuy('a', 1), mkBuy('b', 2), mkBuy('c', 3)],
+    { cats, itemNames, items: [], transactions: [] });
+  const enriched = preview.buys.map((h, i) => ({ ...h, rarity: ['orange', 'red', 'yellow'][i] }));
+  const { keptBuys } = P.reconcileScanRarity(preview, enriched);
+  assert.strictEqual(keptBuys.length, 3, 'orange, red and yellow auction buys are all kept');
+});
+
+test('an item-market buy with a null rarity is STILL dropped (phantom protection intact)', () => {
+  // The auction exemption must not leak to the item market / bazaar, where the
+  // standard-variant phantom lives.
+  const itemNames = { 219: 'Enfield SA-80' };
+  const c = { 'enfield sa-80': 'Primary' };
+  const buy = P.classifyLogEvent({
+    id: 'mkt-buy', timestamp: 1783000000,
+    data: { items: [{ id: 219, uid: 555 }], cost_total: 200_000 },
+  }, P.SCAN_LOG_TYPES.itemMarketBuy, 'mkt-buy', itemNames, c);
+  const preview = P.buildScanPreview([buy], { cats: c, itemNames, items: [], transactions: [] });
+  const enriched = preview.buys.map(h => ({ ...h, rarity: null }));
+  const { keptBuys } = P.reconcileScanRarity(preview, enriched);
+  assert.strictEqual(keptBuys.length, 0, 'a colourless item-market buy is dropped as before');
+});
+
+test('a uid-less auction SELL closes an old uid-less held row (does not drop as "no armoury uid")', () => {
+  // Bug: "auction SELL on an old-age held item does not match and close the previous
+  // item." Old / manually-entered held rows carry no uid, and the auction sale log
+  // may not surface one either. The uid-less-sale drop is scoped to the item market
+  // and bazaar (where stackable non-RW variants live); the auction house lists only
+  // single RW instances, so a uid-less auction sell must reach matchSell and close
+  // its uid-less held row by name.
+  const itemNames = { 614: 'Diamond Bladed Knife' };
+  const sale = P.classifyLogEvent({
+    id: 'auction-sell', timestamp: 1783100000,
+    data: { item: { id: 614, name: 'Diamond Bladed Knife' }, final_price: 50_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.auctionSale, 'auction-sell', itemNames, cats);
+  assert.strictEqual(sale.sell.uid, null, 'this auction sale log carried no uid');
+  assert.strictEqual(sale.sell.venue, 'auction');
+
+  const preview = P.buildScanPreview([sale], {
+    cats, itemNames,
+    items: [{ id: 'old-row', itemName: 'Diamond Bladed Knife', uid: null, status: 'held', bonuses: [], buyPrice: 30_000_000 }],
+    transactions: [],
+  });
+  assert.strictEqual(preview.sales.length, 1, 'the uid-less auction sale is matched, not ignored');
+  assert.strictEqual(preview.sales[0].matchedId, 'old-row');
+  assert.ok(!preview.ignored.some(r => r.reason === 'non-RW sale — no armoury uid'),
+    'the auction sale is not dropped as a uid-less non-RW dump');
+});
+
+test('a uid-less auction SELL still cannot steal a uid-bearing RW row (phantom protection intact)', () => {
+  // The auction exemption only lets a uid-less auction sale reach matchSell — it does
+  // NOT relax matchSell. A uid-bearing held RW row can still only be closed by its
+  // exact-uid sale, so a uid-less auction sell of the same name cannot grab it.
+  const itemNames = { 614: 'Diamond Bladed Knife' };
+  const sale = P.classifyLogEvent({
+    id: 'auction-sell', timestamp: 1783100000,
+    data: { item: { id: 614, name: 'Diamond Bladed Knife' }, final_price: 5_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.auctionSale, 'auction-sell', itemNames, cats);
+  const preview = P.buildScanPreview([sale], {
+    cats, itemNames,
+    items: [{ id: 'rw-row', itemName: 'Diamond Bladed Knife', uid: 777, status: 'held', bonuses: [], buyPrice: 75_000_000 }],
+    transactions: [],
+  });
+  assert.strictEqual(preview.sales.length, 0, 'the uid-less auction sale cannot close the uid-bearing RW row');
+  assert.strictEqual(preview.sales.filter(s => s.matchedId === 'rw-row').length, 0);
+});
+
+test('a uid-less item-market sell is STILL dropped as a non-RW dump (auction exemption is channel-scoped)', () => {
+  const itemNames = { 614: 'Diamond Bladed Knife' };
+  const sale = P.classifyLogEvent({
+    id: 'mkt-sell', timestamp: 1783100000,
+    data: { items: [{ id: 614, uid: 0, name: 'Diamond Bladed Knife' }], cost_total: 30_000_000, buyer: 'Buyer' },
+  }, P.SCAN_LOG_TYPES.itemMarketSale, 'mkt-sell', itemNames, cats);
+  const preview = P.buildScanPreview([sale], {
+    cats, itemNames,
+    items: [{ id: 'old-row', itemName: 'Diamond Bladed Knife', uid: null, status: 'held', bonuses: [], buyPrice: 30_000_000 }],
+    transactions: [],
+  });
+  assert.strictEqual(preview.sales.length, 0);
+  assert.ok(preview.ignored.some(r => r.reason === 'non-RW sale — no armoury uid'),
+    'a uid-less item-market sell is still a phantom dump');
+});

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Torn RW Trading Hub
 // @namespace    estradarpm-rw-trading-hub
-// @version      0.3.237
+// @version      0.3.238
 // @description  Trader's workbench for ranked-war armor & weapon flipping - ledger + advertising hub
 // @author       Built for EstradaRPM
 // @match        https://www.torn.com/*
@@ -16,7 +16,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '0.3.237';
+  const SCRIPT_VERSION = '0.3.238';
 
   // Skip the DOM bootstrap when required by the Node test shim (ADR-0002).
   const TEST = typeof globalThis !== 'undefined' && globalThis.__RWTH_TEST__ === true;
@@ -1592,10 +1592,17 @@
 
   // Every RW-tradeable instance carries a colour rarity: weapons are yellow/
   // orange/red variants of a null-bonus standard, and armor (riot/dune/assault=
-  // yellow, EOD=red) always has one. So rarity is the whole test — red/orange/
-  // yellow is RW, anything else (a standard no-bonus Minigun, a consumable like
-  // Ipecac Syrup, or a row whose itemdetails never resolved) is not, and is
-  // dropped. No rarity, no useful row.
+  // yellow, EOD=red) always has one. All three colours count equally — there is
+  // NO yellow bias; orange and red are just as RW-tradeable. So rarity is the
+  // test for rows we CAN colour: red/orange/yellow is RW, a resolved non-colour
+  // (a standard no-bonus Minigun, a consumable like Ipecac Syrup) is not.
+  //
+  // The catch itemdetails can't disambiguate: Torn's rarity enum is only
+  // yellow|orange|red|null, so a FAILED lookup and a genuine standard item BOTH
+  // read as null. A null therefore can't by itself condemn a buy — see
+  // scanHitRaritySettled / reconcileScanRarity, where an auction buy (a
+  // deliberate, logged purchase from the RW auction house) is kept even when its
+  // colour never resolved, rather than silently vanishing.
   const RW_TRADE_RARITIES = ['yellow', 'orange', 'red'];
   function scanHitIsRwTradeable(hit) {
     return RW_TRADE_RARITIES.indexOf(String((hit && hit.rarity) || '').toLowerCase()) !== -1;
@@ -1617,6 +1624,13 @@
   // is gone. So: drop every non-RW buy, and every sale whose matchedId pointed at
   // one of those dropped buys. Sales matched to a pre-existing open ledger row are
   // untouched — those ids are real makeId rows, never a scan-buy: staged id.
+  //
+  // One buy is exempt from the drop: an AUCTION-HOUSE win (buySource==='auction').
+  // Torn's rarity enum is only yellow|orange|red|null, so a failed/echoed
+  // itemdetails lookup is indistinguishable from a standard item by rarity alone.
+  // An auction win is a deliberate purchase from the RW channel, so we keep it on
+  // a null rarity rather than silently dropping a real buy (the "orange auction
+  // buy never detected" report). Its matched same-batch sale is kept with it.
   function reconcileScanRarity(preview, enrichedBuys) {
     const pv = preview || {};
     const keptBuys = [];
@@ -1626,7 +1640,18 @@
     // buy can inherit the bonus name that only arrived with itemdetails (below).
     const keptBuyById = new Map();
     for (const h of enrichedBuys || []) {
-      if (scanHitIsRwTradeable(h)) {
+      // Keep a buy on either proof of RW-ness:
+      //   1. a resolved colour rarity (yellow/orange/red) — the itemdetails verdict; OR
+      //   2. it came through the AUCTION HOUSE. An auction win is a deliberate,
+      //      logged purchase from the channel where RW gear trades, so a null
+      //      rarity there means "colour didn't resolve" (missing/echoed uid, a
+      //      failed or rate-limited itemdetails call) far more often than "this is
+      //      a standard item". Dropping it silently loses a real purchase — the
+      //      exact "orange auction buy never detected" report. The user can still
+      //      uncheck a rare non-RW auction win; losing a real one is worse.
+      // Item-market / bazaar buys still require a resolved colour (that is where
+      // the standard-variant phantom lives — see the Enfield phantom test).
+      if (scanHitIsRwTradeable(h) || h.buySource === 'auction') {
         keptBuys.push(h);
         const keptId = scanBuyMatchId(h);
         if (keptId) keptBuyById.set(keptId, h);
@@ -1704,11 +1729,13 @@
       : logType === SCAN_LOG_TYPES.itemMarketSale ? 'market'
         : logType === SCAN_LOG_TYPES.auctionSale ? 'auction' : null;
     // v2 item-market/bazaar sell: cost_each = gross per unit, cost_total = net
-    // total already after fee, fee = market fee (bazaar omits it).
+    // total already after fee, fee = market fee (bazaar omits it). An AUCTION sell
+    // reports the winning bid under final_price (the same field an auction BUY
+    // uses), so include it — otherwise auction sales post $0 proceeds.
     const qty = firstNum(data.items && data.items[0] && data.items[0].qty) || 1;
     const fees = firstNum(data.fee, data.fees, data.tax) || 0;
-    const net = firstNum(data.cost_total, data.net, data.total, data.total_price, data.proceeds);
-    const grossUnit = firstNum(data.cost_each, data.gross, data.sale_gross, data.price, data.sale_price, data.amount);
+    const net = firstNum(data.cost_total, data.net, data.total, data.total_price, data.proceeds, data.final_price);
+    const grossUnit = firstNum(data.cost_each, data.gross, data.sale_gross, data.price, data.sale_price, data.amount, data.final_price);
     const gross = (grossUnit ? grossUnit * qty : 0) || (net ? net + fees : 0);
     const buyerM = text.match(/\bto\s+(\S+?)\s+(?:at\s+\$|for a total|\$)/i);
     return {
@@ -2030,7 +2057,20 @@
       // This kills the recurring "non-RW variant imported as the RW sale" bug
       // structurally. (The paste-a-sale flow calls matchSell directly and still
       // matches uid-less pasted lines by name — this gate is scan-only.)
-      if (sell.uid == null) {
+      //
+      // EXCEPTION — the AUCTION channel. The item market and bazaar carry
+      // stackable standard variants, so a uid-less sale there IS the phantom. The
+      // auction house does not: you list a single non-stackable RW instance, and
+      // that is the only kind of gear that trades there. So a uid-less AUCTION
+      // sell is not a non-RW dump — it is a real RW sale whose log (or the older
+      // held row it should close) simply didn't surface the uid, the "auction
+      // SELL on an old-age held item never closes the row" report. Let it through
+      // to matchSell, where the name-path uid filter still forbids it from
+      // stealing a uid-bearing RW row and the value guard still backstops the
+      // uid-less⇄uid-less legacy match. So it can only close a genuinely uid-less
+      // held row of the same name — exactly the old row we want to close.
+      const auctionSell = sell.venue === 'auction' && !pend.trade;
+      if (sell.uid == null && !auctionSell) {
         preview.ignored.push({ type: 'ignored',
           reason: pend.trade ? 'non-RW trade sale — no armoury uid' : 'non-RW sale — no armoury uid',
           eventKeys: pend.eventKeys, itemName: sell.itemName });
